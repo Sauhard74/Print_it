@@ -41,6 +41,21 @@ object FileUtils {
      */
     fun openPdfFile(context: Context, file: File) {
         try {
+            // Check if file exists
+            if (!file.exists() || file.length() <= 0) {
+                Log.e(TAG, "File does not exist or is empty: ${file.absolutePath}")
+                android.widget.Toast.makeText(
+                    context,
+                    "File does not exist or is empty",
+                    android.widget.Toast.LENGTH_LONG
+                ).show()
+                return
+            }
+
+            // Detect actual file type by reading magic numbers (file signature)
+            val fileType = detectFileType(file)
+            Log.d(TAG, "Detected file type: $fileType for ${file.name}")
+            
             val uri = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
                 // For Android 7.0+ (API level 24+), we need to use FileProvider
                 FileProvider.getUriForFile(
@@ -53,40 +68,46 @@ object FileUtils {
                 Uri.fromFile(file)
             }
             
-            // Determine MIME type based on file extension
-            val mimeType = when {
-                file.name.endsWith(".pdf", ignoreCase = true) -> "application/pdf"
-                file.name.endsWith(".jpg", ignoreCase = true) || 
-                    file.name.endsWith(".jpeg", ignoreCase = true) -> "image/jpeg"
-                file.name.endsWith(".png", ignoreCase = true) -> "image/png"
-                file.name.endsWith(".raw", ignoreCase = true) -> {
-                    // For raw files, try to open with general document viewer
-                    "application/octet-stream"
-                }
+            // Determine MIME type based on file extension or detected type
+            val mimeType = when (fileType) {
+                "PDF" -> "application/pdf"
+                "JPEG" -> "image/jpeg"
+                "PNG" -> "image/png"
                 else -> "application/octet-stream"
             }
             
             Log.d(TAG, "Opening file ${file.name} with MIME type: $mimeType")
             
-            try {
-                // Try to open with the specific MIME type first
-                val intent = Intent(Intent.ACTION_VIEW).apply {
-                    setDataAndType(uri, mimeType)
-                    flags = Intent.FLAG_ACTIVITY_NEW_DOCUMENT or 
-                           Intent.FLAG_GRANT_READ_URI_PERMISSION
-                    addCategory(Intent.CATEGORY_OPENABLE)
-                }
+            // Create an intent to view the file
+            val intent = Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(uri, mimeType)
+                flags = Intent.FLAG_ACTIVITY_NEW_DOCUMENT or 
+                       Intent.FLAG_GRANT_READ_URI_PERMISSION
+                addCategory(Intent.CATEGORY_OPENABLE)
+            }
+            
+            // Try to start an activity to view the file
+            if (intent.resolveActivity(context.packageManager) != null) {
                 context.startActivity(intent)
-            } catch (e: Exception) {
-                // If that fails, try a generic viewer
-                Log.e(TAG, "Error opening with specific mime type, trying generic opener", e)
-                val genericIntent = Intent(Intent.ACTION_VIEW).apply {
+            } else {
+                // Fallback - try with generic MIME type
+                Log.d(TAG, "No app to handle $mimeType, trying generic viewer")
+                val fallbackIntent = Intent(Intent.ACTION_VIEW).apply {
                     setDataAndType(uri, "*/*")
                     flags = Intent.FLAG_ACTIVITY_NEW_DOCUMENT or 
                            Intent.FLAG_GRANT_READ_URI_PERMISSION
-                    addCategory(Intent.CATEGORY_OPENABLE)
                 }
-                context.startActivity(genericIntent)
+                
+                try {
+                    context.startActivity(fallbackIntent)
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error opening file with fallback intent", e)
+                    android.widget.Toast.makeText(
+                        context,
+                        "Unable to open file. No compatible app found.",
+                        android.widget.Toast.LENGTH_LONG
+                    ).show()
+                }
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error opening file", e)
@@ -94,9 +115,58 @@ object FileUtils {
             // Show a toast to the user
             android.widget.Toast.makeText(
                 context,
-                "Unable to open file. No compatible app found for this file type.",
+                "Unable to open file. Error: ${e.message}",
                 android.widget.Toast.LENGTH_LONG
             ).show()
+        }
+    }
+    
+    /**
+     * Detects the file type by reading its signature/magic number
+     * @return String representing the file type (PDF, JPEG, PNG, or UNKNOWN)
+     */
+    private fun detectFileType(file: File): String {
+        return try {
+            file.inputStream().use { stream ->
+                val header = ByteArray(8)  // Most signatures are within the first 8 bytes
+                val bytesRead = stream.read(header, 0, header.size)
+                
+                if (bytesRead >= 4) {
+                    // Check for PDF signature (%PDF)
+                    if (header[0] == 0x25.toByte() && header[1] == 0x50.toByte() && 
+                        header[2] == 0x44.toByte() && header[3] == 0x46.toByte()) {
+                        return "PDF"
+                    }
+                    
+                    // Check for JPEG signature (JFIF, Exif)
+                    if (header[0] == 0xFF.toByte() && header[1] == 0xD8.toByte() && 
+                        header[2] == 0xFF.toByte()) {
+                        return "JPEG"
+                    }
+                    
+                    // Check for PNG signature
+                    if (bytesRead >= 8 && 
+                        header[0] == 0x89.toByte() && header[1] == 0x50.toByte() && 
+                        header[2] == 0x4E.toByte() && header[3] == 0x47.toByte() && 
+                        header[4] == 0x0D.toByte() && header[5] == 0x0A.toByte() && 
+                        header[6] == 0x1A.toByte() && header[7] == 0x0A.toByte()) {
+                        return "PNG"
+                    }
+                }
+                
+                // If no known signature is found, try to determine by extension
+                when {
+                    file.name.endsWith(".pdf", ignoreCase = true) -> "PDF"
+                    file.name.endsWith(".jpg", ignoreCase = true) || 
+                        file.name.endsWith(".jpeg", ignoreCase = true) -> "JPEG"
+                    file.name.endsWith(".png", ignoreCase = true) -> "PNG"
+                    file.name.endsWith(".raw", ignoreCase = true) -> "RAW"
+                    else -> "UNKNOWN"
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error detecting file type", e)
+            "UNKNOWN"
         }
     }
     

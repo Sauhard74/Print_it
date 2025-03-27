@@ -454,7 +454,7 @@ fun PrintJobItem(
                         Text(
                             text = "$fileFormat • ${file.length() / 1024} KB",
                             style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.outline
+                            color = MaterialTheme.colorScheme.primary
                         )
                     }
                 }
@@ -465,12 +465,30 @@ fun PrintJobItem(
                     onClick = {
                         FileUtils.openPdfFile(context, file)
                     },
-                    modifier = Modifier.padding(end = 8.dp)
+                    modifier = Modifier
+                        .padding(end = 8.dp)
+                        .height(40.dp),
+                    colors = ButtonDefaults.filledTonalButtonColors(
+                        containerColor = MaterialTheme.colorScheme.primary,
+                        contentColor = MaterialTheme.colorScheme.onPrimary
+                    )
                 ) {
+                    Icon(
+                        imageVector = Icons.Default.Info,
+                        contentDescription = null,
+                        modifier = Modifier.padding(end = 8.dp)
+                    )
                     Text("View")
                 }
                 
-                FilledTonalIconButton(onClick = onDeleteClick) {
+                FilledTonalIconButton(
+                    onClick = onDeleteClick,
+                    modifier = Modifier.height(40.dp),
+                    colors = IconButtonDefaults.filledTonalIconButtonColors(
+                        containerColor = MaterialTheme.colorScheme.errorContainer,
+                        contentColor = MaterialTheme.colorScheme.error
+                    )
+                ) {
                     Icon(
                         imageVector = Icons.Default.Delete,
                         contentDescription = "Delete Job"
