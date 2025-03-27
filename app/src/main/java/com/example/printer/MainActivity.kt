@@ -415,22 +415,20 @@ fun PrintJobItem(
         else -> "DATA"
     }
     
-    // Choose icon based on file format
     val fileIcon = Icons.Default.Info
     
     Card(
-        modifier = Modifier
-            .fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth(),
         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
     ) {
-        Row(
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(16.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
+                .padding(16.dp)
         ) {
+            // File info row
             Row(
+                modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Icon(
@@ -450,27 +448,30 @@ fun PrintJobItem(
                         style = MaterialTheme.typography.bodyLarge
                     )
                     Spacer(modifier = Modifier.height(4.dp))
-                    Row {
-                        Text(
-                            text = "$fileFormat • ${file.length() / 1024} KB",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                    }
+                    Text(
+                        text = "$fileFormat • ${file.length() / 1024} KB",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary
+                    )
                 }
             }
             
-            Row {
-                FilledTonalButton(
+            Spacer(modifier = Modifier.height(12.dp))
+            
+            // Action buttons row
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End
+            ) {
+                Button(
                     onClick = {
                         FileUtils.openPdfFile(context, file)
                     },
                     modifier = Modifier
                         .padding(end = 8.dp)
-                        .height(40.dp),
-                    colors = ButtonDefaults.filledTonalButtonColors(
-                        containerColor = MaterialTheme.colorScheme.primary,
-                        contentColor = MaterialTheme.colorScheme.onPrimary
+                        .height(48.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.primary
                     )
                 ) {
                     Icon(
@@ -481,18 +482,19 @@ fun PrintJobItem(
                     Text("View")
                 }
                 
-                FilledTonalIconButton(
+                Button(
                     onClick = onDeleteClick,
-                    modifier = Modifier.height(40.dp),
-                    colors = IconButtonDefaults.filledTonalIconButtonColors(
-                        containerColor = MaterialTheme.colorScheme.errorContainer,
-                        contentColor = MaterialTheme.colorScheme.error
+                    modifier = Modifier.height(48.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.error
                     )
                 ) {
                     Icon(
                         imageVector = Icons.Default.Delete,
-                        contentDescription = "Delete Job"
+                        contentDescription = "Delete",
+                        modifier = Modifier.padding(end = 8.dp)
                     )
+                    Text("Delete")
                 }
             }
         }

@@ -52,8 +52,30 @@ object FileUtils {
                 return
             }
 
-            // Detect actual file type by reading magic numbers (file signature)
-            val fileType = detectFileType(file)
+            // Always try to detect if it's actually a PDF regardless of extension
+            val isPdf = try {
+                file.inputStream().use { stream ->
+                    val bytes = ByteArray(4)
+                    val bytesRead = stream.read(bytes, 0, bytes.size)
+                    bytesRead >= 4 && 
+                    bytes[0] == '%'.toByte() && 
+                    bytes[1] == 'P'.toByte() && 
+                    bytes[2] == 'D'.toByte() && 
+                    bytes[3] == 'F'.toByte()
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error checking PDF signature", e)
+                false
+            }
+            
+            Log.d(TAG, "File ${file.name} is PDF based on content signature: $isPdf")
+            
+            // Determine file type for display
+            val fileType = if (isPdf) {
+                "PDF"
+            } else {
+                detectFileType(file)
+            }
             Log.d(TAG, "Detected file type: $fileType for ${file.name}")
             
             val uri = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
@@ -68,12 +90,12 @@ object FileUtils {
                 Uri.fromFile(file)
             }
             
-            // Determine MIME type based on file extension or detected type
-            val mimeType = when (fileType) {
-                "PDF" -> "application/pdf"
-                "JPEG" -> "image/jpeg"
-                "PNG" -> "image/png"
-                else -> "application/octet-stream"
+            // Determine MIME type based on detected content
+            val mimeType = when {
+                isPdf -> "application/pdf"
+                fileType == "JPEG" -> "image/jpeg"
+                fileType == "PNG" -> "image/png"
+                else -> "application/pdf" // Default to PDF
             }
             
             Log.d(TAG, "Opening file ${file.name} with MIME type: $mimeType")

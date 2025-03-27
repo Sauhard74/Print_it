@@ -499,77 +499,141 @@ class PrinterService(private val context: Context) {
             // Log incoming document format
             Log.d(TAG, "Saving document with format: $documentFormat and size: ${docBytes.size} bytes")
             
-            // Detect actual file format based on content
-            val extension = if (isPdf(docBytes)) {
-                Log.d(TAG, "Detected PDF format based on content signature")
-                "pdf"
-            } else if (isPng(docBytes)) {
-                Log.d(TAG, "Detected PNG format based on content signature")
-                "png"
-            } else if (isJpeg(docBytes)) {
-                Log.d(TAG, "Detected JPEG format based on content signature")
-                "jpg"
-            } else {
-                // For unknown formats, use raw data extension
-                Log.d(TAG, "Unknown format, saving as raw data")
-                "raw"
+            // Try to find PDF signature in bytes (%PDF)
+            var isPdf = false
+            var pdfStartIndex = -1
+            
+            // Search for PDF header
+            for (i in 0 until docBytes.size - 4) {
+                if (docBytes[i] == '%'.toByte() && 
+                    docBytes[i + 1] == 'P'.toByte() && 
+                    docBytes[i + 2] == 'D'.toByte() && 
+                    docBytes[i + 3] == 'F'.toByte()) {
+                    isPdf = true
+                    pdfStartIndex = i
+                    Log.d(TAG, "Found PDF signature at position $i")
+                    break
+                }
             }
             
-            Log.d(TAG, "Using file extension: $extension")
+            // Process based on what we found
+            if (isPdf && pdfStartIndex >= 0) {
+                // Create PDF file with only the PDF content
+                val pdfBytes = docBytes.copyOfRange(pdfStartIndex, docBytes.size)
+                val filename = "print_job_${jobId}.pdf"
+                val file = File(printJobsDirectory, filename)
+                
+                Log.d(TAG, "Saving extracted PDF data (${pdfBytes.size} bytes) to: ${file.absolutePath}")
+                
+                FileOutputStream(file).use { it.write(pdfBytes) }
+                
+                Log.d(TAG, "PDF document extracted and saved to: ${file.absolutePath}")
+                
+                if (file.exists() && file.length() > 0) {
+                    // Notify that a new job was received
+                    val intent = android.content.Intent("com.example.printer.NEW_PRINT_JOB")
+                    intent.putExtra("job_path", file.absolutePath)
+                    intent.putExtra("job_size", pdfBytes.size)
+                    intent.putExtra("job_id", jobId)
+                    intent.putExtra("document_format", "application/pdf")
+                    intent.putExtra("detected_format", "pdf")
+                    Log.d(TAG, "Broadcasting print job notification: ${intent.action}")
+                    context.sendBroadcast(intent)
+                }
+                return
+            }
             
-            // Create a unique filename using timestamp
-            val filename = "print_job_${jobId}.$extension"
-            val file = File(printJobsDirectory, filename)
+            // If we reach here, it's not a PDF or we couldn't find a PDF signature
+            // Save raw data first to allow debugging
+            val rawFilename = "print_job_${jobId}.raw"
+            val rawFile = File(printJobsDirectory, rawFilename)
             
-            Log.d(TAG, "Saving to file: ${file.absolutePath}")
+            Log.d(TAG, "Saving original raw data to: ${rawFile.absolutePath}")
+            FileOutputStream(rawFile).use { it.write(docBytes) }
             
-            // Save the document data to the file
-            FileOutputStream(file).use { it.write(docBytes) }
+            // Now try to convert to PDF if possible based on format
+            val isPrintableFormat = documentFormat.contains("pdf", ignoreCase = true) || 
+                                  documentFormat.contains("postscript", ignoreCase = true) ||
+                                  documentFormat.contains("vnd.cups", ignoreCase = true) ||
+                                  documentFormat == "application/octet-stream"
             
-            Log.d(TAG, "Document saved to: ${file.absolutePath} with format: $documentFormat, extension: $extension")
+            if (isPrintableFormat) {
+                // Create a PDF wrapper for the content
+                val pdfWrapper = createPdfWrapper(docBytes, documentFormat)
+                val pdfFilename = "print_job_${jobId}.pdf"
+                val pdfFile = File(printJobsDirectory, pdfFilename)
+                
+                Log.d(TAG, "Creating synthetic PDF with original data: ${pdfFile.absolutePath}")
+                FileOutputStream(pdfFile).use { it.write(pdfWrapper) }
+                
+                if (pdfFile.exists() && pdfFile.length() > 0) {
+                    // Notify about the PDF file instead of raw
+                    val intent = android.content.Intent("com.example.printer.NEW_PRINT_JOB")
+                    intent.putExtra("job_path", pdfFile.absolutePath)
+                    intent.putExtra("job_size", pdfWrapper.size)
+                    intent.putExtra("job_id", jobId)
+                    intent.putExtra("document_format", "application/pdf")
+                    intent.putExtra("detected_format", "pdf")
+                    Log.d(TAG, "Broadcasting PDF print job notification: ${intent.action}")
+                    context.sendBroadcast(intent)
+                    
+                    // Delete the raw file since we have PDF now
+                    rawFile.delete()
+                    return
+                }
+            }
             
-            if (file.exists() && file.length() > 0) {
-                // Notify any observers that a new job was received
+            // If PDF conversion fails, notify about the raw file
+            if (rawFile.exists() && rawFile.length() > 0) {
                 val intent = android.content.Intent("com.example.printer.NEW_PRINT_JOB")
-                intent.putExtra("job_path", file.absolutePath)
+                intent.putExtra("job_path", rawFile.absolutePath)
                 intent.putExtra("job_size", docBytes.size)
                 intent.putExtra("job_id", jobId)
                 intent.putExtra("document_format", documentFormat)
-                intent.putExtra("detected_format", extension)
-                Log.d(TAG, "Broadcasting print job notification: ${intent.action}")
+                intent.putExtra("detected_format", "raw")
+                Log.d(TAG, "Broadcasting raw print job notification: ${intent.action}")
                 context.sendBroadcast(intent)
             }
+            
         } catch (e: Exception) {
             Log.e(TAG, "Error saving document", e)
         }
     }
     
-    // Helper functions to detect file formats
-    private fun isPdf(bytes: ByteArray): Boolean {
-        return bytes.size >= 4 && 
-            bytes[0] == '%'.toByte() && 
-            bytes[1] == 'P'.toByte() && 
-            bytes[2] == 'D'.toByte() && 
-            bytes[3] == 'F'.toByte()
-    }
-    
-    private fun isPng(bytes: ByteArray): Boolean {
-        return bytes.size >= 8 && 
-            bytes[0] == 0x89.toByte() && 
-            bytes[1] == 'P'.toByte() && 
-            bytes[2] == 'N'.toByte() && 
-            bytes[3] == 'G'.toByte() && 
-            bytes[4] == 0x0D.toByte() && 
-            bytes[5] == 0x0A.toByte() && 
-            bytes[6] == 0x1A.toByte() && 
-            bytes[7] == 0x0A.toByte()
-    }
-    
-    private fun isJpeg(bytes: ByteArray): Boolean {
-        return bytes.size >= 3 && 
-            bytes[0] == 0xFF.toByte() && 
-            bytes[1] == 0xD8.toByte() && 
-            bytes[2] == 0xFF.toByte()
+    /**
+     * Creates a basic PDF wrapper around arbitrary data
+     */
+    private fun createPdfWrapper(data: ByteArray, format: String): ByteArray {
+        try {
+            // Very simple PDF creation
+            val header = "%PDF-1.7\n"
+            val obj1 = "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n"
+            val obj2 = "2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n"
+            val obj3 = "3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R >>\nendobj\n"
+            
+            // Create a stream object with the raw data
+            val streamData = "4 0 obj\n<< /Length ${data.size} >>\nstream\n"
+            val streamEnd = "\nendstream\nendobj\n"
+            
+            // PDF trailer
+            val xref = "xref\n0 5\n0000000000 65535 f\n0000000010 00000 n\n0000000060 00000 n\n0000000120 00000 n\n0000000210 00000 n\n"
+            val trailer = "trailer\n<< /Size 5 /Root 1 0 R >>\nstartxref\n300\n%%EOF"
+            
+            // Combine everything
+            val pdfContent = header + obj1 + obj2 + obj3 + streamData
+            val result = ByteArrayOutputStream()
+            result.write(pdfContent.toByteArray())
+            result.write(data)
+            result.write(streamEnd.toByteArray())
+            result.write(xref.toByteArray())
+            result.write(trailer.toByteArray())
+            
+            return result.toByteArray()
+        } catch (e: Exception) {
+            Log.e(TAG, "Error creating PDF wrapper", e)
+            // Return original data if PDF creation fails
+            return data
+        }
     }
     
     private fun stopServer() {
