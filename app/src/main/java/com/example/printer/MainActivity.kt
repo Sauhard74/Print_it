@@ -9,6 +9,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -18,20 +19,54 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.example.printer.printer.PrinterService
 import com.example.printer.settings.SettingsScreen
-import com.example.printer.settings.SettingsScreen
 import com.example.printer.ui.theme.PrinterTheme
 import com.example.printer.utils.FileUtils
+import com.example.printer.utils.PreferenceUtils
 import kotlinx.coroutines.delay
 import java.io.File
 
 class MainActivity : ComponentActivity() {
     private lateinit var printerService: PrinterService
+    private val printJobReceiver = object : android.content.BroadcastReceiver() {
+        override fun onReceive(context: android.content.Context, intent: android.content.Intent) {
+            android.util.Log.d("MainActivity", "Received broadcast: ${intent.action}")
+            if (intent.action == "com.example.printer.NEW_PRINT_JOB") {
+                val jobPath = intent.getStringExtra("job_path") ?: "unknown"
+                val jobSize = intent.getIntExtra("job_size", 0)
+                android.util.Log.d("MainActivity", "Print job received: $jobPath, size: $jobSize bytes")
+                
+                // Immediately refresh
+                refreshTriggerState?.value = (refreshTriggerState?.value ?: 0) + 1
+                android.util.Log.d("MainActivity", "Triggered UI refresh: ${refreshTriggerState?.value}")
+                
+                // Also queue additional refreshes with delay
+                (0..5).forEach { i ->
+                    android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                        refreshTriggerState?.value = (refreshTriggerState?.value ?: 0) + 1
+                        android.util.Log.d("MainActivity", "Delayed refresh #$i: ${refreshTriggerState?.value}")
+                    }, (i+1) * 1000L)  // 1-6 seconds delay
+                }
+            }
+        }
+    }
+    
+    // Companion object to hold a static reference to the state
+    companion object {
+        var refreshTriggerState: androidx.compose.runtime.MutableState<Int>? = null
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         
         // Initialize the printer service
         printerService = PrinterService(this)
+        
+        // Register the broadcast receiver
+        registerReceiver(
+            printJobReceiver, 
+            android.content.IntentFilter("com.example.printer.NEW_PRINT_JOB"),
+            android.content.Context.RECEIVER_NOT_EXPORTED
+        )
         
         setContent {
             PrinterTheme {
@@ -48,6 +83,11 @@ class MainActivity : ComponentActivity() {
     override fun onDestroy() {
         super.onDestroy()
         printerService.stopPrinterService()
+        try {
+            unregisterReceiver(printJobReceiver)
+        } catch (e: Exception) {
+            // Receiver might not be registered
+        }
     }
 }
 
@@ -80,16 +120,19 @@ fun PrinterApp(
     var refreshTrigger by remember { mutableStateOf(0) }
     var showDeleteAllDialog by remember { mutableStateOf(false) }
     
+    // Store reference to refresh trigger state in companion object for broadcast access
+    MainActivity.refreshTriggerState = remember { mutableStateOf(0) }
+    
     // Function to refresh the list of saved files
     val refreshSavedFiles = {
         savedFiles = FileUtils.getSavedPrintJobs(context)
     }
     
-    // Periodically refresh the list of saved files every 3 seconds
-    LaunchedEffect(refreshTrigger) {
+    // Periodically refresh the list of saved files and also when refreshTrigger changes
+    LaunchedEffect(refreshTrigger, MainActivity.refreshTriggerState?.value) {
         while (true) {
             refreshSavedFiles()
-            delay(3000) // 3 seconds
+            delay(1000) // 1 second refresh interval
         }
     }
 
@@ -143,8 +186,13 @@ fun PrinterApp(
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = { Text("Android Virtual Printer") },
+            CenterAlignedTopAppBar(
+                title = { 
+                    Text(
+                        text = PreferenceUtils.getCustomPrinterName(context),
+                        style = MaterialTheme.typography.titleLarge
+                    ) 
+                },
                 actions = {
                     IconButton(onClick = onSettingsClick) {
                         Icon(
@@ -166,7 +214,8 @@ fun PrinterApp(
             Card(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(bottom = 16.dp)
+                    .padding(bottom = 16.dp),
+                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
             ) {
                 Column(
                     modifier = Modifier
@@ -174,11 +223,38 @@ fun PrinterApp(
                         .padding(16.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(bottom = 8.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Info,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.padding(end = 8.dp)
+                        )
+                        Text(
+                            text = "Printer Status",
+                            style = MaterialTheme.typography.titleMedium
+                        )
+                    }
+                    
+                    Divider(modifier = Modifier.padding(vertical = 8.dp))
+                    
                     Text(
                         text = statusMessage,
                         style = MaterialTheme.typography.bodyLarge,
                         textAlign = TextAlign.Center
                     )
+                    
+                    if (isServiceRunning) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = "Waiting for print jobs...",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.outline
+                        )
+                    }
                 }
             }
             
@@ -190,13 +266,23 @@ fun PrinterApp(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(
-                    text = "Received Print Jobs",
-                    style = MaterialTheme.typography.titleMedium
-                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Info,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(end = 8.dp)
+                    )
+                    Text(
+                        text = "Received Print Jobs",
+                        style = MaterialTheme.typography.titleMedium
+                    )
+                }
                 
                 if (savedFiles.isNotEmpty()) {
-                    IconButton(
+                    FilledTonalIconButton(
                         onClick = { showDeleteAllDialog = true }
                     ) {
                         Icon(
@@ -209,7 +295,8 @@ fun PrinterApp(
             
             if (savedFiles.isEmpty()) {
                 Card(
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier.fillMaxWidth(),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
                 ) {
                     Box(
                         modifier = Modifier
@@ -217,16 +304,29 @@ fun PrinterApp(
                             .padding(32.dp),
                         contentAlignment = Alignment.Center
                     ) {
-                        Text(
-                            text = "No print jobs received yet.\nFiles will appear here when someone prints to this printer.",
-                            textAlign = TextAlign.Center,
-                            style = MaterialTheme.typography.bodyMedium
-                        )
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Info,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.outline,
+                                modifier = Modifier
+                                    .size(48.dp)
+                                    .padding(bottom = 16.dp)
+                            )
+                            Text(
+                                text = "No print jobs received yet.\nFiles will appear here when someone prints to this printer.",
+                                textAlign = TextAlign.Center,
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                        }
                     }
                 }
             } else {
                 LazyColumn(
-                    modifier = Modifier.weight(1f)
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     items(savedFiles) { file ->
                         PrintJobItem(
@@ -252,8 +352,8 @@ fun PrintJobItem(
     
     Card(
         modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 4.dp),
+            .fillMaxWidth(),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
     ) {
         Row(
             modifier = Modifier
@@ -277,7 +377,7 @@ fun PrintJobItem(
             }
             
             Row {
-                Button(
+                FilledTonalButton(
                     onClick = {
                         FileUtils.openPdfFile(context, file)
                     },
@@ -286,7 +386,7 @@ fun PrintJobItem(
                     Text("View")
                 }
                 
-                IconButton(onClick = onDeleteClick) {
+                FilledTonalIconButton(onClick = onDeleteClick) {
                     Icon(
                         imageVector = Icons.Default.Delete,
                         contentDescription = "Delete Job"

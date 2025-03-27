@@ -1,3 +1,11 @@
 <resources>
-    <string name="app_name">Printer</string>
+    <string name="app_name">Virtual Printer</string>
+    <string name="app_description">Android Virtual Printer for Testing and Debugging</string>
+    <string name="printer_status">Printer Status</string>
+    <string name="printer_jobs">Received Print Jobs</string>
+    <string name="no_jobs">No print jobs received yet.\nFiles will appear here when someone prints to this printer.</string>
+    <string name="delete_all_confirm">Are you sure you want to delete all print jobs? This action cannot be undone.</string>
+    <string name="delete_all">Delete All</string>
+    <string name="cancel">Cancel</string>
+    <string name="view">View</string>
 </resources>
