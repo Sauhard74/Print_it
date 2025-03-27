@@ -68,6 +68,9 @@ class MainActivity : ComponentActivity() {
             android.content.Context.RECEIVER_NOT_EXPORTED
         )
         
+        // Try to fix existing data files by renaming them to PDF
+        fixDataFiles()
+        
         setContent {
             PrinterTheme {
                 Surface(
@@ -87,6 +90,56 @@ class MainActivity : ComponentActivity() {
             unregisterReceiver(printJobReceiver)
         } catch (e: Exception) {
             // Receiver might not be registered
+        }
+    }
+
+    /**
+     * Attempts to fix existing .data files by renaming them to proper extensions
+     */
+    private fun fixDataFiles() {
+        try {
+            val printJobsDir = File(filesDir, "print_jobs")
+            if (!printJobsDir.exists()) {
+                printJobsDir.mkdirs()
+                return
+            }
+            
+            val dataFiles = printJobsDir.listFiles { file -> 
+                file.name.endsWith(".data") 
+            } ?: return
+            
+            android.util.Log.d("MainActivity", "Found ${dataFiles.size} .data files to fix")
+            
+            dataFiles.forEach { file ->
+                try {
+                    // Check if it's a PDF by reading the first few bytes
+                    val isPdf = file.inputStream().use { stream ->
+                        val bytes = ByteArray(4)
+                        stream.read(bytes, 0, bytes.size)
+                        bytes.size >= 4 && 
+                        bytes[0] == '%'.toByte() && 
+                        bytes[1] == 'P'.toByte() && 
+                        bytes[2] == 'D'.toByte() && 
+                        bytes[3] == 'F'.toByte()
+                    }
+                    
+                    // Create a new name replacing .data with .pdf
+                    val newName = if (isPdf) {
+                        file.name.replace(".data", ".pdf")
+                    } else {
+                        // Default to PDF if we can't determine the type
+                        file.name.replace(".data", ".pdf")
+                    }
+                    
+                    val newFile = File(printJobsDir, newName)
+                    val success = file.renameTo(newFile)
+                    android.util.Log.d("MainActivity", "Renamed ${file.name} to ${newFile.name}: $success")
+                } catch (e: Exception) {
+                    android.util.Log.e("MainActivity", "Error renaming file ${file.name}", e)
+                }
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("MainActivity", "Error fixing data files", e)
         }
     }
 }

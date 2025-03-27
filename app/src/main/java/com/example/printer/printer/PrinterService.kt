@@ -499,42 +499,12 @@ class PrinterService(private val context: Context) {
             // Log incoming document format
             Log.d(TAG, "Saving document with format: $documentFormat and size: ${docBytes.size} bytes")
             
-            // Try to detect PDF from content if format is octet-stream
-            var actualFormat = documentFormat
+            // IMPORTANT: Always save as PDF - ignore the document format
+            // This ensures files are always viewable in PDF viewers
+            val extension = "pdf"
             
-            // For application/octet-stream from macOS, force to PDF
-            if (actualFormat == "application/octet-stream" || actualFormat == "application/vnd.cups-raw") {
-                // Check for PDF signature
-                if (docBytes.size >= 4 && 
-                    docBytes[0] == '%'.toByte() && 
-                    docBytes[1] == 'P'.toByte() && 
-                    docBytes[2] == 'D'.toByte() && 
-                    docBytes[3] == 'F'.toByte()) {
-                    actualFormat = "application/pdf"
-                    Log.d(TAG, "Detected PDF content from signature, using PDF format")
-                }
-                // Even if we can't detect PDF markers, for macOS we'll default to PDF
-                else if (actualFormat == "application/vnd.cups-raw") {
-                    actualFormat = "application/pdf" 
-                    Log.d(TAG, "Using PDF format for CUPS raw data")
-                }
-            }
+            Log.d(TAG, "Forcing extension to $extension regardless of format to ensure compatibility")
             
-            // Determine appropriate file extension based on document format
-            val extension = when (actualFormat.lowercase()) {
-                "application/pdf" -> "pdf"
-                "image/jpeg" -> "jpg"
-                "image/png" -> "png"
-                "text/plain" -> "txt"
-                "application/postscript" -> "ps"
-                "application/vnd.cups-pdf" -> "pdf"
-                "application/vnd.cups-postscript" -> "ps"
-                "application/vnd.cups-raw" -> "pdf" // Force CUPS raw to PDF
-                else -> "pdf" // Default to PDF since most print jobs are PDFs
-            }
-
-            Log.d(TAG, "Using extension: $extension for document format: $actualFormat")
-
             // Create a unique filename using timestamp
             val filename = "print_job_${jobId}.$extension"
             val file = File(printJobsDirectory, filename)
@@ -544,7 +514,7 @@ class PrinterService(private val context: Context) {
             // Save the document data to the file
             FileOutputStream(file).use { it.write(docBytes) }
             
-            Log.d(TAG, "Document saved to: ${file.absolutePath} with format: $actualFormat, extension: $extension")
+            Log.d(TAG, "Document saved to: ${file.absolutePath} with format: $documentFormat, extension: $extension")
             
             if (file.exists() && file.length() > 0) {
                 // Notify any observers that a new job was received
@@ -552,7 +522,7 @@ class PrinterService(private val context: Context) {
                 intent.putExtra("job_path", file.absolutePath)
                 intent.putExtra("job_size", docBytes.size)
                 intent.putExtra("job_id", jobId)
-                intent.putExtra("document_format", actualFormat)
+                intent.putExtra("document_format", documentFormat)
                 Log.d(TAG, "Broadcasting print job notification: ${intent.action}")
                 context.sendBroadcast(intent)
             }
