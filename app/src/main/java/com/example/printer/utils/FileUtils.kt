@@ -37,7 +37,7 @@ object FileUtils {
     }
     
     /**
-     * Opens a file using an appropriate viewer app based on file type
+     * Opens a file using appropriate viewer app based on file extension
      */
     fun openPdfFile(context: Context, file: File) {
         try {
@@ -57,73 +57,46 @@ object FileUtils {
             val mimeType = when {
                 file.name.endsWith(".pdf", ignoreCase = true) -> "application/pdf"
                 file.name.endsWith(".jpg", ignoreCase = true) || 
-                file.name.endsWith(".jpeg", ignoreCase = true) -> "image/jpeg"
+                    file.name.endsWith(".jpeg", ignoreCase = true) -> "image/jpeg"
                 file.name.endsWith(".png", ignoreCase = true) -> "image/png"
-                file.name.endsWith(".txt", ignoreCase = true) -> "text/plain"
-                file.name.endsWith(".ps", ignoreCase = true) -> "application/postscript"
-                file.name.endsWith(".data", ignoreCase = true) -> {
-                    // For legacy .data files, try to determine content based on file header
-                    determineDataFileMimeType(file) ?: "application/octet-stream"
+                file.name.endsWith(".raw", ignoreCase = true) -> {
+                    // For raw files, try to open with general document viewer
+                    "application/octet-stream"
                 }
                 else -> "application/octet-stream"
             }
             
             Log.d(TAG, "Opening file ${file.name} with MIME type: $mimeType")
             
-            val intent = Intent(Intent.ACTION_VIEW).apply {
-                setDataAndType(uri, mimeType)
-                flags = Intent.FLAG_ACTIVITY_NO_HISTORY or Intent.FLAG_GRANT_READ_URI_PERMISSION
+            try {
+                // Try to open with the specific MIME type first
+                val intent = Intent(Intent.ACTION_VIEW).apply {
+                    setDataAndType(uri, mimeType)
+                    flags = Intent.FLAG_ACTIVITY_NEW_DOCUMENT or 
+                           Intent.FLAG_GRANT_READ_URI_PERMISSION
+                    addCategory(Intent.CATEGORY_OPENABLE)
+                }
+                context.startActivity(intent)
+            } catch (e: Exception) {
+                // If that fails, try a generic viewer
+                Log.e(TAG, "Error opening with specific mime type, trying generic opener", e)
+                val genericIntent = Intent(Intent.ACTION_VIEW).apply {
+                    setDataAndType(uri, "*/*")
+                    flags = Intent.FLAG_ACTIVITY_NEW_DOCUMENT or 
+                           Intent.FLAG_GRANT_READ_URI_PERMISSION
+                    addCategory(Intent.CATEGORY_OPENABLE)
+                }
+                context.startActivity(genericIntent)
             }
-            
-            context.startActivity(intent)
         } catch (e: Exception) {
             Log.e(TAG, "Error opening file", e)
-        }
-    }
-    
-    /**
-     * Attempts to determine MIME type of a .data file by checking its header
-     */
-    private fun determineDataFileMimeType(file: File): String? {
-        return try {
-            val bytes = ByteArray(8)
-            file.inputStream().use { 
-                it.read(bytes, 0, bytes.size)
-            }
             
-            // Check for PDF signature
-            if (bytes.size >= 4 && 
-                bytes[0] == '%'.toByte() && 
-                bytes[1] == 'P'.toByte() && 
-                bytes[2] == 'D'.toByte() && 
-                bytes[3] == 'F'.toByte()) {
-                "application/pdf"
-            }
-            // Check for JPEG signature
-            else if (bytes.size >= 3 && 
-                bytes[0] == 0xFF.toByte() && 
-                bytes[1] == 0xD8.toByte() && 
-                bytes[2] == 0xFF.toByte()) {
-                "image/jpeg"
-            }
-            // Check for PNG signature
-            else if (bytes.size >= 8 && 
-                bytes[0] == 137.toByte() && 
-                bytes[1] == 80.toByte() && 
-                bytes[2] == 78.toByte() && 
-                bytes[3] == 71.toByte() && 
-                bytes[4] == 13.toByte() && 
-                bytes[5] == 10.toByte() && 
-                bytes[6] == 26.toByte() && 
-                bytes[7] == 10.toByte()) {
-                "image/png"
-            }
-            else {
-                null
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Error determining file type", e)
-            null
+            // Show a toast to the user
+            android.widget.Toast.makeText(
+                context,
+                "Unable to open file. No compatible app found for this file type.",
+                android.widget.Toast.LENGTH_LONG
+            ).show()
         }
     }
     

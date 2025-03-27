@@ -499,11 +499,23 @@ class PrinterService(private val context: Context) {
             // Log incoming document format
             Log.d(TAG, "Saving document with format: $documentFormat and size: ${docBytes.size} bytes")
             
-            // IMPORTANT: Always save as PDF - ignore the document format
-            // This ensures files are always viewable in PDF viewers
-            val extension = "pdf"
+            // Detect actual file format based on content
+            val extension = if (isPdf(docBytes)) {
+                Log.d(TAG, "Detected PDF format based on content signature")
+                "pdf"
+            } else if (isPng(docBytes)) {
+                Log.d(TAG, "Detected PNG format based on content signature")
+                "png"
+            } else if (isJpeg(docBytes)) {
+                Log.d(TAG, "Detected JPEG format based on content signature")
+                "jpg"
+            } else {
+                // For unknown formats, use raw data extension
+                Log.d(TAG, "Unknown format, saving as raw data")
+                "raw"
+            }
             
-            Log.d(TAG, "Forcing extension to $extension regardless of format to ensure compatibility")
+            Log.d(TAG, "Using file extension: $extension")
             
             // Create a unique filename using timestamp
             val filename = "print_job_${jobId}.$extension"
@@ -523,12 +535,41 @@ class PrinterService(private val context: Context) {
                 intent.putExtra("job_size", docBytes.size)
                 intent.putExtra("job_id", jobId)
                 intent.putExtra("document_format", documentFormat)
+                intent.putExtra("detected_format", extension)
                 Log.d(TAG, "Broadcasting print job notification: ${intent.action}")
                 context.sendBroadcast(intent)
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error saving document", e)
         }
+    }
+    
+    // Helper functions to detect file formats
+    private fun isPdf(bytes: ByteArray): Boolean {
+        return bytes.size >= 4 && 
+            bytes[0] == '%'.toByte() && 
+            bytes[1] == 'P'.toByte() && 
+            bytes[2] == 'D'.toByte() && 
+            bytes[3] == 'F'.toByte()
+    }
+    
+    private fun isPng(bytes: ByteArray): Boolean {
+        return bytes.size >= 8 && 
+            bytes[0] == 0x89.toByte() && 
+            bytes[1] == 'P'.toByte() && 
+            bytes[2] == 'N'.toByte() && 
+            bytes[3] == 'G'.toByte() && 
+            bytes[4] == 0x0D.toByte() && 
+            bytes[5] == 0x0A.toByte() && 
+            bytes[6] == 0x1A.toByte() && 
+            bytes[7] == 0x0A.toByte()
+    }
+    
+    private fun isJpeg(bytes: ByteArray): Boolean {
+        return bytes.size >= 3 && 
+            bytes[0] == 0xFF.toByte() && 
+            bytes[1] == 0xD8.toByte() && 
+            bytes[2] == 0xFF.toByte()
     }
     
     private fun stopServer() {

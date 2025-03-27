@@ -6,10 +6,12 @@ import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -403,6 +405,19 @@ fun PrintJobItem(
 ) {
     val context = LocalContext.current
     
+    // Determine file format for display and icon
+    val fileFormat = when {
+        file.name.endsWith(".pdf", ignoreCase = true) -> "PDF"
+        file.name.endsWith(".jpg", ignoreCase = true) || 
+            file.name.endsWith(".jpeg", ignoreCase = true) -> "JPEG"
+        file.name.endsWith(".png", ignoreCase = true) -> "PNG"
+        file.name.endsWith(".raw", ignoreCase = true) -> "RAW"
+        else -> "DATA"
+    }
+    
+    // Choose icon based on file format
+    val fileIcon = Icons.Default.Info
+    
     Card(
         modifier = Modifier
             .fillMaxWidth(),
@@ -415,18 +430,34 @@ fun PrintJobItem(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            Column(
-                modifier = Modifier.weight(1f)
+            Row(
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(
-                    text = FileUtils.getReadableName(file),
-                    style = MaterialTheme.typography.bodyLarge
+                Icon(
+                    imageVector = fileIcon,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier
+                        .size(40.dp)
+                        .padding(end = 12.dp)
                 )
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = "Size: ${file.length() / 1024} KB",
-                    style = MaterialTheme.typography.bodySmall
-                )
+                
+                Column(
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text(
+                        text = FileUtils.getReadableName(file),
+                        style = MaterialTheme.typography.bodyLarge
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Row {
+                        Text(
+                            text = "$fileFormat • ${file.length() / 1024} KB",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.outline
+                        )
+                    }
+                }
             }
             
             Row {
