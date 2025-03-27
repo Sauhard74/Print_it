@@ -2,6 +2,12 @@
 
 An Android application that simulates an IPP (Internet Printing Protocol) printer, allowing you to capture print jobs from any device on your network and save them as PDF files for viewing, testing, and debugging.
 
+**Current working of application , updated as of 27 March 2025**
+
+
+
+https://github.com/user-attachments/assets/da209f7a-9c60-4745-b1cd-f91c05bf09d6
+
 
 
 ## 🚀 Overview
