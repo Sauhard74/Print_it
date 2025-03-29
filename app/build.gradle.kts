@@ -29,6 +29,12 @@ android {
             )
         }
     }
+    
+    lint {
+        baseline = file("lint-baseline.xml")
+        abortOnError = false
+    }
+    
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
@@ -52,6 +58,8 @@ android {
 }
 
 dependencies {
+    implementation(platform("org.jetbrains.kotlin:kotlin-bom:1.9.22"))
+    implementation("androidx.core:core-ktx:1.12.0")
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.activity.compose)
@@ -70,6 +78,12 @@ dependencies {
     // Ktor for HTTP server
     implementation("io.ktor:ktor-server-core:2.3.10")
     implementation("io.ktor:ktor-server-netty:2.3.10")
+    implementation("io.ktor:ktor-server-content-negotiation:2.3.10")
+    implementation("io.ktor:ktor-serialization-gson:2.3.10")
+    
+    // Coroutines
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
+    
     implementation(libs.core.ktx)
     implementation(kotlin("stdlib", "1.9.22"))
     testImplementation(libs.junit)

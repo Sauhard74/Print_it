@@ -15,6 +15,7 @@ import java.io.FileOutputStream
 import java.io.IOException
 import java.util.NoSuchElementException
 import java.util.ListIterator
+import io.ktor.server.response.*
 
 object IppAttributesUtils {
     private const val TAG = "IppAttributesUtils"
@@ -566,6 +567,75 @@ object IppAttributesUtils {
             override fun toString(): String {
                 return "AttributeGroup(tag=$tag, attributes=${attributes.size})"
             }
+        }
+    }
+    
+    /**
+     * Converts IPP attributes to a JSON string
+     */
+    fun ippAttributesToJson(attributes: List<AttributeGroup>): String {
+        val jsonObject = JSONObject()
+        val attributeGroupsArray = JSONArray()
+        
+        attributes.forEach { group ->
+            val groupObject = JSONObject()
+            groupObject.put("tag", group.tag.name)
+            
+            val attributesArray = JSONArray()
+            val attributesInGroup = getAttributesFromGroup(group)
+            
+            attributesInGroup.forEach { attr ->
+                val attributeObject = JSONObject()
+                attributeObject.put("name", attr.name)
+                
+                when {
+                    attr.size > 1 -> {
+                        // Handle multi-value attributes
+                        val valuesArray = JSONArray()
+                        for (i in 0 until attr.size) {
+                            valuesArray.put(attr[i].toString())
+                        }
+                        attributeObject.put("values", valuesArray)
+                        attributeObject.put("type", "collection")
+                    }
+                    else -> {
+                        // Handle single-value attributes
+                        attributeObject.put("value", attr.toString())
+                        attributeObject.put("type", getAttributeType(attr))
+                    }
+                }
+                
+                attributesArray.put(attributeObject)
+            }
+            
+            groupObject.put("attributes", attributesArray)
+            attributeGroupsArray.put(groupObject)
+        }
+        
+        jsonObject.put("attributeGroups", attributeGroupsArray)
+        return jsonObject.toString(2)  // Pretty print with 2-space indentation
+    }
+    
+    /**
+     * Saves IPP attributes as a formatted JSON file
+     */
+    fun saveIppAttributesAsJson(context: Context, attributes: List<AttributeGroup>, filename: String): Boolean {
+        try {
+            val jsonString = ippAttributesToJson(attributes)
+            
+            val attributesDir = File(context.filesDir, CUSTOM_ATTRIBUTES_DIR)
+            if (!attributesDir.exists()) {
+                attributesDir.mkdirs()
+            }
+            
+            val file = File(attributesDir, filename)
+            FileOutputStream(file).use { it.write(jsonString.toByteArray()) }
+            
+            Log.d(TAG, "Saved IPP attributes as JSON to: ${file.absolutePath}")
+            return true
+        } catch (e: Exception) {
+            Log.e(TAG, "Error saving IPP attributes as JSON", e)
+            return false
         }
     }
 } 

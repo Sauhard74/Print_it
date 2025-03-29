@@ -43,6 +43,10 @@ class PrinterService(private val context: Context) {
     private var server: ApplicationEngine? = null
     private var customIppAttributes: List<AttributeGroup>? = null
     
+    // Add error simulation properties
+    private var simulateErrorMode = false
+    private var errorType = "none" // Options: "none", "server-error", "client-error", "aborted", "unsupported-format"
+    
     private val printJobsDirectory: File by lazy {
         File(context.filesDir, "print_jobs").apply {
             if (!exists()) mkdirs()
@@ -54,6 +58,25 @@ class PrinterService(private val context: Context) {
     }
     
     fun getPort(): Int = PORT
+    
+    /**
+     * Configures error simulation
+     * @param enable Whether to enable error simulation
+     * @param type Type of error to simulate (none, server-error, client-error, aborted, unsupported-format)
+     */
+    fun configureErrorSimulation(enable: Boolean, type: String = "none") {
+        simulateErrorMode = enable
+        errorType = type
+        Log.d(TAG, "Error simulation ${if(enable) "enabled" else "disabled"} with type: $type")
+    }
+    
+    /**
+     * Gets current error simulation status
+     * @return Pair of (isEnabled, errorType)
+     */
+    fun getErrorSimulationStatus(): Pair<Boolean, String> {
+        return Pair(simulateErrorMode, errorType)
+    }
     
     fun setCustomIppAttributes(attributes: List<AttributeGroup>?) {
         customIppAttributes = attributes
@@ -225,6 +248,74 @@ class PrinterService(private val context: Context) {
         call: ApplicationCall
     ): IppPacket {
         Log.d(TAG, "Processing IPP request: ${request.code}, operation: ${request.operation?.name ?: "unknown"}")
+        
+        // Check for error simulation before normal processing
+        if (simulateErrorMode) {
+            return when (errorType) {
+                "server-error" -> {
+                    Log.d(TAG, "Simulating server error response")
+                    IppPacket(Status.serverErrorInternalError, request.requestId)
+                }
+                "client-error" -> {
+                    Log.d(TAG, "Simulating client error response")
+                    IppPacket(Status.clientErrorNotPossible, request.requestId)
+                }
+                "aborted" -> {
+                    Log.d(TAG, "Simulating aborted job response")
+                    if (request.code == Operation.printJob.code || request.code == Operation.createJob.code) {
+                        val jobId = System.currentTimeMillis().toInt()
+                        IppPacket(
+                            Status.clientErrorNotPossible,
+                            request.requestId,
+                            AttributeGroup.groupOf(
+                                Tag.operationAttributes,
+                                Types.attributesCharset.of("utf-8"),
+                                Types.attributesNaturalLanguage.of("en")
+                            ),
+                            AttributeGroup.groupOf(
+                                Tag.jobAttributes,
+                                Types.jobId.of(jobId),
+                                Types.jobState.of(7), // 7 = canceled
+                                Types.jobStateReasons.of("job-canceled-by-system")
+                            )
+                        )
+                    } else {
+                        IppPacket(Status.clientErrorNotPossible, request.requestId)
+                    }
+                }
+                "unsupported-format" -> {
+                    Log.d(TAG, "Simulating unsupported format response")
+                    if (request.code == Operation.printJob.code || request.code == Operation.validateJob.code) {
+                        IppPacket(
+                            Status.clientErrorDocumentFormatNotSupported,
+                            request.requestId,
+                            AttributeGroup.groupOf(
+                                Tag.operationAttributes,
+                                Types.attributesCharset.of("utf-8"),
+                                Types.attributesNaturalLanguage.of("en"),
+                                Types.statusMessage.of("Document format not supported")
+                            )
+                        )
+                    } else {
+                        IppPacket(Status.successfulOk, request.requestId)
+                    }
+                }
+                else -> {
+                    // Fall through to normal processing if error type is "none" or invalid
+                    null
+                }
+            } ?: processNormalRequest(request, documentData, call)
+        } else {
+            // Normal processing without error simulation
+            return processNormalRequest(request, documentData, call)
+        }
+    }
+    
+    private fun processNormalRequest(
+        request: IppPacket,
+        documentData: ByteArray,
+        call: ApplicationCall
+    ): IppPacket {
         return when (request.code) {
             Operation.printJob.code -> { // Print-Job operation
                 try {
