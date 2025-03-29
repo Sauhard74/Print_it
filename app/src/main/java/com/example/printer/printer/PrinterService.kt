@@ -41,6 +41,7 @@ class PrinterService(private val context: Context) {
     private var nsdManager: NsdManager? = null
     private var registrationListener: NsdManager.RegistrationListener? = null
     private var server: ApplicationEngine? = null
+    private var customIppAttributes: List<AttributeGroup>? = null
     
     private val printJobsDirectory: File by lazy {
         File(context.filesDir, "print_jobs").apply {
@@ -53,6 +54,15 @@ class PrinterService(private val context: Context) {
     }
     
     fun getPort(): Int = PORT
+    
+    fun setCustomIppAttributes(attributes: List<AttributeGroup>?) {
+        customIppAttributes = attributes
+        Log.d(TAG, "Set custom IPP attributes: ${attributes?.size ?: 0} groups")
+    }
+    
+    fun getCustomIppAttributes(): List<AttributeGroup>? {
+        return customIppAttributes
+    }
     
     fun startPrinterService(onSuccess: () -> Unit, onError: (String) -> Unit) {
         try {
@@ -415,6 +425,21 @@ class PrinterService(private val context: Context) {
     }
     
     private fun createPrinterAttributesResponse(request: IppPacket): IppPacket {
+        // If custom attributes are set, use them
+        if (customIppAttributes != null) {
+            Log.d(TAG, "Using custom IPP attributes for printer response")
+            return IppPacket(
+                Status.successfulOk,
+                request.requestId,
+                AttributeGroup.groupOf(
+                    Tag.operationAttributes,
+                    Types.attributesCharset.of("utf-8"),
+                    Types.attributesNaturalLanguage.of("en")
+                ),
+                *customIppAttributes!!.toTypedArray()
+            )
+        }
+        
         // Get the IP address of the device
         val hostAddress = getLocalIpAddress() ?: "127.0.0.1"
         
@@ -478,7 +503,6 @@ class PrinterService(private val context: Context) {
             
             // Capabilities
             Types.colorSupported.of(true)
-            // Copies and sides support are removed for simplicity as they were causing type issues
         )
         
         // Create the response packet with operation attributes and printer attributes
