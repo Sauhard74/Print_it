@@ -6,7 +6,10 @@ An Android application that simulates an IPP (Internet Printing Protocol) printe
 
 
 
-https://github.com/user-attachments/assets/da209f7a-9c60-4745-b1cd-f91c05bf09d6
+
+https://github.com/user-attachments/assets/fc9b4f11-7ad7-4ad4-8163-b26255c5e98c
+
+
 
 
 
