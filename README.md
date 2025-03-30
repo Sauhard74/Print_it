@@ -2,7 +2,7 @@
 
 An Android application that simulates an IPP (Internet Printing Protocol) printer, allowing you to capture print jobs from any device on your network and save them as PDF files for viewing, testing, and debugging.
 
-**Current working of application , updated as of 27 March 2025**
+**Current working of application , updated as of 31 st March 2024**
 
 
 
@@ -22,6 +22,8 @@ Android Virtual Printer is a sophisticated solution for developers, testers, and
 - **Format Detection**: Intelligently determines file formats from binary data
 - **Customization**: Configure printer name and other settings
 - **Modern UI**: Built with Jetpack Compose for a beautiful, responsive interface
+-**Network Printer Connection**: Now you can connect with the on network Printers and attain its attributes
+- **Improved File Management**: Enhanced file deletion options including batch operations
 
 ## 📋 Technical Details
 
@@ -64,6 +66,7 @@ The application uses sophisticated techniques for handling various document form
 2. **PDF Extraction**: For documents containing embedded PDFs, extracts only the relevant portion
 3. **PDF Wrapping**: For non-PDF documents, can create a valid PDF wrapper to ensure viewability
 4. **Multi-format Support**: Handles PDF, JPEG, PNG, PostScript and raw data
+5. **Auto-correction**: New feature to automatically fix corrupted data files
 {
 ```kotlin
 private fun saveDocument(docBytes: ByteArray, jobId: Long, documentFormat: String) {
@@ -94,6 +97,7 @@ The UI is built with Jetpack Compose featuring:
 2. **Settings Screen**: Allows customization of printer name and other options
 3. **Print Job List**: Shows all received documents with type, size, and timestamp
 4. **File Viewer Integration**: Opens files with appropriate system viewers
+5. **Batch Operations**: New feature to delete all print jobs at once
 {
 ```kotlin
 @Composable
@@ -103,6 +107,44 @@ fun PrinterApp(
 ) {
     // UI implementation using Jetpack Compose
     // ...
+    
+    // New batch operations UI
+    if (savedFiles.isNotEmpty()) {
+        FilledTonalIconButton(
+            onClick = { showDeleteAllDialog = true }
+        ) {
+            Icon(
+                imageVector = Icons.Default.Delete,
+                contentDescription = "Delete All"
+            )
+        }
+    }
+    
+    if (showDeleteAllDialog) {
+        AlertDialog(
+            onDismissRequest = { showDeleteAllDialog = false },
+            title = { Text("Delete All Print Jobs") },
+            text = { Text("Are you sure you want to delete all print jobs? This action cannot be undone.") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        FileUtils.deleteAllPrintJobs(context)
+                        refreshSavedFiles()
+                        showDeleteAllDialog = false
+                    }
+                ) {
+                    Text("Delete All")
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { showDeleteAllDialog = false }
+                ) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
 }
 ```
 }
@@ -140,14 +182,34 @@ The `FileUtils` class provides robust file management:
 1. **Storage Management**: Organizes files in a dedicated directory
 2. **Format Detection**: Uses file signatures to determine content type
 3. **Viewer Integration**: Opens files with appropriate system applications
+4. **Data Recovery**: New utility to fix corrupted .data files by detecting and renaming them
 {
 ```kotlin
 fun openPdfFile(context: Context, file: File) {
     try {
-        // Detect actual content type regardless of extension
-        val fileType = detectFileType(file)
+        // Check if file exists
+        if (!file.exists() || file.length() <= 0) {
+            Log.e(TAG, "File does not exist or is empty: ${file.absolutePath}")
+            return
+        }
+
+        // Always try to detect if it's actually a PDF regardless of extension
+        val isPdf = try {
+            file.inputStream().use { stream ->
+                val bytes = ByteArray(4)
+                stream.read(bytes, 0, bytes.size)
+                bytesRead >= 4 && 
+                bytes[0] == '%'.toByte() && 
+                bytes[1] == 'P'.toByte() && 
+                bytes[2] == 'D'.toByte() && 
+                bytes[3] == 'F'.toByte()
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error checking PDF signature", e)
+            false
+        }
         
-        // Create proper Intent with correct MIME type
+        // Enhanced file type detection
         // ...
     } catch (e: Exception) {
         // Error handling
@@ -155,6 +217,60 @@ fun openPdfFile(context: Context, file: File) {
 }
 ```
 }
+
+#### New Data Recovery Utility
+
+```kotlin
+/**
+ * Attempts to fix existing .data files by renaming them to proper extensions
+ */
+private fun fixDataFiles() {
+    try {
+        val printJobsDir = File(filesDir, "print_jobs")
+        if (!printJobsDir.exists()) {
+            printJobsDir.mkdirs()
+            return
+        }
+        
+        val dataFiles = printJobsDir.listFiles { file -> 
+            file.name.endsWith(".data") 
+        } ?: return
+        
+        android.util.Log.d("MainActivity", "Found ${dataFiles.size} .data files to fix")
+        
+        dataFiles.forEach { file ->
+            try {
+                // Check if it's a PDF by reading the first few bytes
+                val isPdf = file.inputStream().use { stream ->
+                    val bytes = ByteArray(4)
+                    stream.read(bytes, 0, bytes.size)
+                    bytes.size >= 4 && 
+                    bytes[0] == '%'.toByte() && 
+                    bytes[1] == 'P'.toByte() && 
+                    bytes[2] == 'D'.toByte() && 
+                    bytes[3] == 'F'.toByte()
+                }
+                
+                // Create a new name replacing .data with .pdf
+                val newName = if (isPdf) {
+                    file.name.replace(".data", ".pdf")
+                } else {
+                    // Default to PDF if we can't determine the type
+                    file.name.replace(".data", ".pdf")
+                }
+                
+                val newFile = File(printJobsDir, newName)
+                val success = file.renameTo(newFile)
+                android.util.Log.d("MainActivity", "Renamed ${file.name} to ${newFile.name}: $success")
+            } catch (e: Exception) {
+                android.util.Log.e("MainActivity", "Error renaming file ${file.name}", e)
+            }
+        }
+    } catch (e: Exception) {
+        android.util.Log.e("MainActivity", "Error fixing data files", e)
+    }
+}
+```
 
 ## 🔍 Development Challenges & Solutions
 
@@ -216,6 +332,20 @@ This approach ensures maximum compatibility across platforms.
 3. Integrated with system document viewers for maximum compatibility
 4. Added format information and file details for better user experience
 
+### Challenge 5: Handling Corrupted Data Files (New)
+
+**Problem**: Some print jobs resulted in corrupted .data files that couldn't be properly viewed or processed.
+
+**Failed Approaches**:
+- Attempting to parse all file formats without checking content signatures
+- Relying solely on file extensions for format detection
+
+**Solution**: 
+1. Implemented automatic data file recovery on application startup
+2. Added binary signature detection to identify actual file formats regardless of extension
+3. Created a smart renaming system to properly convert .data files to appropriate formats
+4. Added enhanced error handling for corrupted files
+
 ## 🛠 Technologies Used
 
 - **Kotlin**: Primary development language
@@ -225,8 +355,9 @@ This approach ensures maximum compatibility across platforms.
 - **Coroutines**: Asynchronous programming
 - **Android Network Service Discovery (NSD)**: For printer advertisement
 - **Android FileProvider**: For sharing files with other applications
+- **Android BroadcastReceiver**: For real-time print job notifications (New)
 
-## 📚 Lessons Learned (till now...)
+## 📚 Lessons Learned
 
 1. **Binary Protocol Handling**: Working with IPP deepened understanding of binary protocols and data parsing
 
@@ -237,6 +368,20 @@ This approach ensures maximum compatibility across platforms.
 4. **Network Service Architecture**: Discovery protocols like DNS-SD require precise implementation details to work reliably
 
 5. **Android System Integration**: Integrating with Android's document system and content providers requires careful permission handling
+
+6. **Asynchronous Notification**: Using BroadcastReceiver for real-time updates improves user experience (New)
+
+7. **Data Recovery**: Implementing file recovery mechanisms increases application robustness (New)
+
+## 🚀 Recent Updates
+
+### March/April 2024 Update
+
+1. **Batch File Management**: Added the ability to delete all print jobs at once
+2. **Real-time Notifications**: Implemented BroadcastReceiver to provide instant UI updates when new print jobs arrive
+3. **Data Recovery**: Added automatic detection and repair of corrupted .data files
+4. **UI Refinements**: Improved status display and error handling in the interface
+5. **Enhanced File Type Detection**: More robust detection of file types regardless of extensions
 
 ## 🔮 Future Enhancements
 
