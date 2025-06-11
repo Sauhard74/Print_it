@@ -171,55 +171,7 @@ class PrinterService(private val context: Context) {
                 .joinToString(" ") { String.format("%02X", it) }
             Log.d(TAG, "Request data starts with: $headerHex")
             
-            // Find the end-of-attributes-tag (0x03) followed by a zero-length attribute
-            // This is a more robust way to find where IPP header ends and document data begins
-            var i = 8 // Skip past the 8-byte IPP header
-            while (i < requestBytes.size - 1) {
-                if (requestBytes[i] == 0x03.toByte()) {
-                    // Found the end-of-attributes-tag
-                    var endPos = i + 1
-                    
-                    // Sometimes there's a delimiter between attributes and document data
-                    // Skip any potential delimiters
-                    while (endPos < requestBytes.size && 
-                           (requestBytes[endPos] == 0x00.toByte() || 
-                            requestBytes[endPos] == 0x0D.toByte() || 
-                            requestBytes[endPos] == 0x0A.toByte())) {
-                        endPos++
-                    }
-                    
-                    if (endPos < requestBytes.size) {
-                        val docBytes = requestBytes.copyOfRange(endPos, requestBytes.size)
-                        Log.d(TAG, "Extracted ${docBytes.size} bytes of document data after position $endPos")
-                        
-                        // Log a snippet of the document data to verify it looks like PDF or other document format
-                        if (docBytes.size > 4) {
-                            val prefix = docBytes.take(Math.min(20, docBytes.size))
-                                .joinToString(" ") { String.format("%02X", it) }
-                            Log.d(TAG, "Document data starts with: $prefix")
-                            
-                            // Check if it starts with %PDF for PDF documents
-                            if (docBytes.size >= 4 && 
-                                docBytes[0] == '%'.toByte() && 
-                                docBytes[1] == 'P'.toByte() && 
-                                docBytes[2] == 'D'.toByte() && 
-                                docBytes[3] == 'F'.toByte()) {
-                                Log.d(TAG, "Document appears to be a PDF based on signature")
-                            } else {
-                                Log.d(TAG, "Document does NOT have PDF signature")
-                            }
-                        }
-                        
-                        return docBytes
-                    }
-                    break
-                }
-                i++
-            }
-            
-            Log.d(TAG, "No document content found using 0x03 end marker. Trying alternative method...")
-            
-            // Alternative approach: if the content-type is application/pdf, try to find the %PDF header
+            // First try: Look for PDF signature throughout the data
             for (i in 0 until requestBytes.size - 4) {
                 if (requestBytes[i] == '%'.toByte() && 
                     requestBytes[i+1] == 'P'.toByte() && 
@@ -232,8 +184,36 @@ class PrinterService(private val context: Context) {
                 }
             }
             
-            // Log more information to help diagnose the issue
-            Log.d(TAG, "Could not extract document data. Total request size: ${requestBytes.size} bytes")
+            // Second try: Find the end-of-attributes-tag (0x03)
+            var i = 8 // Skip past the 8-byte IPP header
+            while (i < requestBytes.size - 1) {
+                if (requestBytes[i] == 0x03.toByte()) {
+                    // Found the end-of-attributes-tag
+                    var endPos = i + 1
+                    
+                    // Account for potential padding after end of attributes
+                    while (endPos < requestBytes.size && 
+                          (requestBytes[endPos] == 0x00.toByte() || 
+                           requestBytes[endPos] == 0x0D.toByte() || 
+                           requestBytes[endPos] == 0x0A.toByte())) {
+                        endPos++
+                    }
+                    
+                    if (endPos < requestBytes.size) {
+                        val docBytes = requestBytes.copyOfRange(endPos, requestBytes.size)
+                        Log.d(TAG, "Extracted ${docBytes.size} bytes of document data after position $endPos")
+                        
+                        return docBytes
+                    }
+                    break
+                }
+                i++
+            }
+            
+            // Last resort: Try to find the highest chunk of non-IPP binary data
+            // This is more complex, but look for the longest sequence of bytes that don't look like IPP
+            // (For now, log this case and return an empty array)
+            Log.d(TAG, "Could not extract document data using standard methods")
             
             return ByteArray(0)
         } catch (e: Exception) {
@@ -716,34 +696,92 @@ class PrinterService(private val context: Context) {
     }
     
     /**
-     * Creates a basic PDF wrapper around arbitrary data
+     * Creates a standard-compliant PDF wrapper around arbitrary data
      */
     private fun createPdfWrapper(data: ByteArray, format: String): ByteArray {
         try {
-            // Very simple PDF creation
-            val header = "%PDF-1.7\n"
-            val obj1 = "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n"
-            val obj2 = "2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n"
-            val obj3 = "3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R >>\nendobj\n"
+            // Check if it's already a PDF
+            if (data.size > 4 &&
+                data[0] == '%'.toByte() && 
+                data[1] == 'P'.toByte() && 
+                data[2] == 'D'.toByte() && 
+                data[3] == 'F'.toByte()) {
+                Log.d(TAG, "Data is already a valid PDF, returning as-is")
+                return data
+            }
             
-            // Create a stream object with the raw data
-            val streamData = "4 0 obj\n<< /Length ${data.size} >>\nstream\n"
-            val streamEnd = "\nendstream\nendobj\n"
+            // Create a proper PDF structure
+            val baos = ByteArrayOutputStream()
             
-            // PDF trailer
-            val xref = "xref\n0 5\n0000000000 65535 f\n0000000010 00000 n\n0000000060 00000 n\n0000000120 00000 n\n0000000210 00000 n\n"
-            val trailer = "trailer\n<< /Size 5 /Root 1 0 R >>\nstartxref\n300\n%%EOF"
+            // PDF header
+            val header = "%PDF-1.7\n%\u00E2\u00E3\u00CF\u00D3\n"
+            baos.write(header.toByteArray())
             
-            // Combine everything
-            val pdfContent = header + obj1 + obj2 + obj3 + streamData
-            val result = ByteArrayOutputStream()
-            result.write(pdfContent.toByteArray())
-            result.write(data)
-            result.write(streamEnd.toByteArray())
-            result.write(xref.toByteArray())
-            result.write(trailer.toByteArray())
+            // Keep track of positions for the xref table
+            val objPositions = mutableMapOf<Int, Int>()
             
-            return result.toByteArray()
+            // Object 1: Catalog
+            objPositions[1] = baos.size()
+            baos.write("1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n".toByteArray())
+            
+            // Object 2: Pages
+            objPositions[2] = baos.size()
+            baos.write("2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n".toByteArray())
+            
+            // Object 3: Page
+            objPositions[3] = baos.size()
+            baos.write("3 0 obj\n<< /Type /Page /Parent 2 0 R /Resources << >> /MediaBox [0 0 612 792] /Contents 4 0 R >>\nendobj\n".toByteArray())
+            
+            // Object 4: Content Stream with data
+            objPositions[4] = baos.size()
+            baos.write("4 0 obj\n<< /Length ${data.size} >>\nstream\n".toByteArray())
+            baos.write(data)
+            baos.write("\nendstream\nendobj\n".toByteArray())
+            
+            // Add info object with metadata
+            objPositions[5] = baos.size()
+            val dateStr = java.text.SimpleDateFormat("yyyyMMddHHmmss").format(java.util.Date())
+            baos.write("""
+                5 0 obj
+                << 
+                   /Title (Android Virtual Printer Document)
+                   /Author (Android Virtual Printer)
+                   /Subject (Print Job)
+                   /Keywords (print, virtual printer)
+                   /Creator (Android Virtual Printer)
+                   /Producer (Android Virtual Printer v1.0)
+                   /CreationDate (D:$dateStr)
+                >>
+                endobj
+                
+            """.trimIndent().toByteArray())
+            
+            // XRef table
+            val xrefPosition = baos.size()
+            baos.write("xref\n0 6\n".toByteArray())
+            baos.write("0000000000 65535 f \n".toByteArray())  // Object 0 entry
+            
+            // Write the positions for each object
+            for (i in 1..5) {
+                val pos = objPositions[i] ?: 0
+                val posStr = pos.toString().padStart(10, '0')
+                baos.write("$posStr 00000 n \n".toByteArray())
+            }
+            
+            // Trailer
+            baos.write("""
+                trailer
+                <<
+                   /Size 6
+                   /Root 1 0 R
+                   /Info 5 0 R
+                >>
+                startxref
+                $xrefPosition
+                %%EOF
+            """.trimIndent().toByteArray())
+            
+            return baos.toByteArray()
         } catch (e: Exception) {
             Log.e(TAG, "Error creating PDF wrapper", e)
             // Return original data if PDF creation fails

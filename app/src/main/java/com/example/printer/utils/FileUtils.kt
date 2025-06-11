@@ -52,85 +52,33 @@ object FileUtils {
                 return
             }
 
-            // Always try to detect if it's actually a PDF regardless of extension
-            val isPdf = try {
-                file.inputStream().use { stream ->
-                    val bytes = ByteArray(4)
-                    val bytesRead = stream.read(bytes, 0, bytes.size)
-                    bytesRead >= 4 && 
-                    bytes[0] == '%'.toByte() && 
-                    bytes[1] == 'P'.toByte() && 
-                    bytes[2] == 'D'.toByte() && 
-                    bytes[3] == 'F'.toByte()
+            // First perform a deep check to verify if it's a valid PDF
+            val isPdfFile = verifyPdfStructure(file)
+            Log.d(TAG, "File ${file.name} is valid PDF: $isPdfFile")
+            
+            // If file has .raw extension and contains PDF data, make a copy with .pdf extension
+            if (file.name.endsWith(".raw", ignoreCase = true) && isPdfFile) {
+                val pdfFile = createPdfCopy(context, file)
+                if (pdfFile != null) {
+                    Log.d(TAG, "Created PDF copy at: ${pdfFile.absolutePath}")
+                    // Continue with the new PDF file
+                    openFileWithProperIntent(context, pdfFile, "application/pdf")
+                    return
                 }
-            } catch (e: Exception) {
-                Log.e(TAG, "Error checking PDF signature", e)
-                false
             }
             
-            Log.d(TAG, "File ${file.name} is PDF based on content signature: $isPdf")
+            // Determine MIME type based on detected content and file extension
+            val fileType = if (isPdfFile) "PDF" else detectFileType(file)
             
-            // Determine file type for display
-            val fileType = if (isPdf) {
-                "PDF"
-            } else {
-                detectFileType(file)
-            }
-            Log.d(TAG, "Detected file type: $fileType for ${file.name}")
-            
-            val uri = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                // For Android 7.0+ (API level 24+), we need to use FileProvider
-                FileProvider.getUriForFile(
-                    context,
-                    "${context.packageName}.fileprovider",
-                    file
-                )
-            } else {
-                // For older Android versions
-                Uri.fromFile(file)
-            }
-            
-            // Determine MIME type based on detected content
             val mimeType = when {
-                isPdf -> "application/pdf"
+                isPdfFile || file.name.endsWith(".pdf", ignoreCase = true) -> "application/pdf"
                 fileType == "JPEG" -> "image/jpeg"
                 fileType == "PNG" -> "image/png"
+                file.name.endsWith(".raw", ignoreCase = true) -> "application/octet-stream"
                 else -> "application/pdf" // Default to PDF
             }
             
-            Log.d(TAG, "Opening file ${file.name} with MIME type: $mimeType")
-            
-            // Create an intent to view the file
-            val intent = Intent(Intent.ACTION_VIEW).apply {
-                setDataAndType(uri, mimeType)
-                flags = Intent.FLAG_ACTIVITY_NEW_DOCUMENT or 
-                       Intent.FLAG_GRANT_READ_URI_PERMISSION
-                addCategory(Intent.CATEGORY_OPENABLE)
-            }
-            
-            // Try to start an activity to view the file
-            if (intent.resolveActivity(context.packageManager) != null) {
-                context.startActivity(intent)
-            } else {
-                // Fallback - try with generic MIME type
-                Log.d(TAG, "No app to handle $mimeType, trying generic viewer")
-                val fallbackIntent = Intent(Intent.ACTION_VIEW).apply {
-                    setDataAndType(uri, "*/*")
-                    flags = Intent.FLAG_ACTIVITY_NEW_DOCUMENT or 
-                           Intent.FLAG_GRANT_READ_URI_PERMISSION
-                }
-                
-                try {
-                    context.startActivity(fallbackIntent)
-                } catch (e: Exception) {
-                    Log.e(TAG, "Error opening file with fallback intent", e)
-                    android.widget.Toast.makeText(
-                        context,
-                        "Unable to open file. No compatible app found.",
-                        android.widget.Toast.LENGTH_LONG
-                    ).show()
-                }
-            }
+            openFileWithProperIntent(context, file, mimeType)
         } catch (e: Exception) {
             Log.e(TAG, "Error opening file", e)
             
@@ -140,6 +88,115 @@ object FileUtils {
                 "Unable to open file. Error: ${e.message}",
                 android.widget.Toast.LENGTH_LONG
             ).show()
+        }
+    }
+    
+    /**
+     * Creates a PDF copy of a file if it contains PDF data but has wrong extension
+     */
+    private fun createPdfCopy(context: Context, file: File): File? {
+        return try {
+            val printJobsDir = File(context.filesDir, "print_jobs")
+            val pdfFile = File(printJobsDir, file.nameWithoutExtension + ".pdf")
+            
+            file.inputStream().use { input ->
+                pdfFile.outputStream().use { output ->
+                    input.copyTo(output)
+                }
+            }
+            
+            if (pdfFile.exists() && pdfFile.length() > 0) {
+                return pdfFile
+            }
+            
+            null
+        } catch (e: Exception) {
+            Log.e(TAG, "Error creating PDF copy", e)
+            null
+        }
+    }
+    
+    /**
+     * Performs deeper verification of PDF structure beyond just checking the header
+     */
+    private fun verifyPdfStructure(file: File): Boolean {
+        return try {
+            file.inputStream().use { stream ->
+                val buffer = ByteArray(1024)
+                val bytesRead = stream.read(buffer, 0, buffer.size)
+                
+                if (bytesRead < 4) return false
+                
+                // Check for PDF header
+                val hasPdfHeader = buffer[0] == '%'.toByte() && 
+                                  buffer[1] == 'P'.toByte() && 
+                                  buffer[2] == 'D'.toByte() && 
+                                  buffer[3] == 'F'.toByte()
+                
+                if (!hasPdfHeader) return false
+                
+                // Look for key PDF structural elements in the first 1024 bytes
+                val content = String(buffer, 0, bytesRead)
+                
+                // Check for common PDF elements
+                val hasObject = content.contains(" obj") || content.contains("\nobj")
+                val hasXref = content.contains("xref")
+                val hasTrailer = content.contains("trailer")
+                
+                // If it has PDF header and at least one structural element, consider it a valid PDF
+                hasPdfHeader && (hasObject || hasXref || hasTrailer)
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error verifying PDF structure", e)
+            false
+        }
+    }
+    
+    private fun openFileWithProperIntent(context: Context, file: File, mimeType: String) {
+        val uri = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            // For Android 7.0+ (API level 24+), we need to use FileProvider
+            FileProvider.getUriForFile(
+                context,
+                "${context.packageName}.fileprovider",
+                file
+            )
+        } else {
+            // For older Android versions
+            Uri.fromFile(file)
+        }
+        
+        Log.d(TAG, "Opening file ${file.name} with MIME type: $mimeType")
+        
+        // Create an intent to view the file
+        val intent = Intent(Intent.ACTION_VIEW).apply {
+            setDataAndType(uri, mimeType)
+            flags = Intent.FLAG_ACTIVITY_NEW_DOCUMENT or 
+                   Intent.FLAG_GRANT_READ_URI_PERMISSION
+            addCategory(Intent.CATEGORY_OPENABLE)
+        }
+        
+        // Try to start an activity to view the file
+        if (intent.resolveActivity(context.packageManager) != null) {
+            context.startActivity(intent)
+        } else {
+            // Fallback - try with generic MIME type
+            Log.d(TAG, "No app to handle $mimeType, trying generic viewer")
+            val fallbackIntent = Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(uri, "*/*")
+                flags = Intent.FLAG_ACTIVITY_NEW_DOCUMENT or 
+                       Intent.FLAG_GRANT_READ_URI_PERMISSION
+            }
+            
+            try {
+                context.startActivity(fallbackIntent)
+            } catch (e: Exception) {
+                Log.e(TAG, "Error opening file with fallback intent", e)
+                android.widget.Toast.makeText(
+                    context,
+                    "Unable to open file. No compatible app found.",
+                    android.widget.Toast.LENGTH_LONG
+                ).show()
+            }
         }
     }
     
