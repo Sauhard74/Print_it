@@ -8,7 +8,7 @@ import com.example.printer.domain.repositories.PrintJobRepository
 import com.example.printer.domain.repositories.PrinterDiscoveryRepository
 import com.example.printer.domain.repositories.SettingsRepository
 import com.example.printer.domain.usecases.*
-import com.example.printer.services.printer.PrinterService
+import com.example.printer.printer.PrinterService
 import com.example.printer.services.discovery.DiscoveryService
 
 /**
@@ -47,8 +47,8 @@ object AppModule {
         settingsRepository = SettingsRepositoryImpl(context)
         
         // Initialize services
-        printerService = PrinterService(context, printJobRepository)
-        discoveryService = DiscoveryService(context)
+        printerService = PrinterService(context)
+        discoveryService = DiscoveryService(context, printerDiscoveryRepository)
         
         // Initialize use cases
         startPrinterServiceUseCase = StartPrinterServiceUseCase(printerService, settingsRepository)

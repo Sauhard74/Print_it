@@ -1,13 +1,26 @@
 plugins {
     alias(libs.plugins.android.application)
-    id("org.jetbrains.kotlin.android")
-    id("kotlin-kapt")
-    id("kotlinx-serialization")
+    alias(libs.plugins.kotlin.android)
+    alias(libs.plugins.kotlin.serialization)
+    kotlin("kapt")
 }
 
 android {
     namespace = "com.example.printer"
     compileSdk = 35
+
+    packaging {
+        resources {
+            excludes += setOf(
+                "META-INF/LICENSE.md",
+                "META-INF/LICENSE-notice.md",
+                "META-INF/NOTICE.md",
+                "META-INF/DEPENDENCIES",
+                "META-INF/LICENSE",
+                "META-INF/NOTICE"
+            )
+        }
+    }
 
     defaultConfig {
         applicationId = "com.example.printer"
@@ -112,6 +125,26 @@ android {
         }
         animationsDisabled = true
     }
+}
+
+// Force consistent BouncyCastle versions to avoid duplicate classes
+configurations.all {
+    resolutionStrategy {
+        force("org.bouncycastle:bcprov-jdk18on:1.77")
+        force("org.bouncycastle:bcpkix-jdk18on:1.77")
+        force("org.bouncycastle:bcutil-jdk18on:1.77")
+        
+        eachDependency {
+            if (requested.group == "org.bouncycastle") {
+                if (requested.name.contains("jdk15to18")) {
+                    useTarget("${requested.group}:${requested.name.replace("jdk15to18", "jdk18on")}:1.77")
+                }
+            }
+        }
+    }
+    
+    // Exclude commons-logging in favor of jcl-over-slf4j bridge
+    exclude(group = "commons-logging", module = "commons-logging")
 }
 
 dependencies {

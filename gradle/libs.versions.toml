@@ -1,7 +1,7 @@
 [versions]
 agp = "8.7.2"
-kotlin = "1.9.22"
-kotlinSerialization = "1.9.22"
+kotlin = "1.9.24"
+kotlinSerialization = "1.9.24"
 jipp = "0.7.16"
 junit = "4.13.2"
 junitVersion = "1.1.5"
@@ -102,7 +102,7 @@ core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx"
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
-kotlin-android = { id = "org.jetbrains.kotlin.android", version = "1.9.24" }
+kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
 kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlinSerialization" }
 kotlin-kapt = { id = "org.jetbrains.kotlin.kapt", version.ref = "kotlin" }
 

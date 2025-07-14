@@ -116,7 +116,7 @@ class DocumentProcessor(
             
             // Step 5: Save original if requested
             if (preserveOriginal && detectedFormat != originalFormat) {
-                val originalFileName = generateFileName(jobId, "original", getExtensionForFormat(originalFormat))
+                val originalFileName = generateFileNameWithSuffix(jobId, "original", getExtensionForFormat(originalFormat))
                 saveProcessedDocument(documentData, originalFileName)
             }
             
@@ -477,7 +477,7 @@ class DocumentProcessor(
         return "print_job_${jobId}_${timestamp}.$ext"
     }
     
-    private fun generateFileName(jobId: Long, suffix: String, extension: String): String {
+    private fun generateFileNameWithSuffix(jobId: Long, suffix: String, extension: String): String {
         val timestamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss"))
         return "print_job_${jobId}_${suffix}_${timestamp}.$extension"
     }

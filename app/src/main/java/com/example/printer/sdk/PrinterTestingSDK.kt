@@ -477,7 +477,7 @@ class PrinterTestingSDK private constructor(
             
             TestCaseResult(
                 documentName = document.name,
-                result = if (result == document.expectedResult) TestResult.PASSED else TestResult.FAILED,
+                result = if (mapExpectedToActual(document.expectedResult, result)) TestResult.PASSED else TestResult.FAILED,
                 processingTime = processingTime,
                 actualFormat = detectActualFormat(document.content)
             )
@@ -627,4 +627,16 @@ class PrinterTestingSDK private constructor(
     private fun exportJsonReport(report: CIReport): File = File(context.filesDir, "report.json")
     private fun exportXmlReport(report: CIReport): File = File(context.filesDir, "report.xml")
     private fun exportHtmlReport(report: CIReport): File = File(context.filesDir, "report.html")
+    
+    /**
+     * Maps expected result to actual result for comparison
+     */
+    private fun mapExpectedToActual(expected: ExpectedResult, actual: Any): Boolean {
+        return when (expected) {
+            ExpectedResult.SUCCESS -> actual.toString().contains("success", ignoreCase = true)
+            ExpectedResult.FAILURE -> actual.toString().contains("fail", ignoreCase = true)
+            ExpectedResult.FORMAT_ERROR -> actual.toString().contains("format", ignoreCase = true)
+            ExpectedResult.TIMEOUT -> actual.toString().contains("timeout", ignoreCase = true)
+        }
+    }
 } 
