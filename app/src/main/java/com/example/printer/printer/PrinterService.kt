@@ -109,53 +109,62 @@ class PrinterService(private val context: Context) {
     private fun startServer() {
         server = embeddedServer(Netty, port = PORT) {
             routing {
-                post("/") {
-                    try {
-                        // Read the entire request body first
-                        val requestBytes = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                            call.receiveStream().readBytes()
-                        }
-                        
-                        // Parse document data vs IPP header
-                        // IPP starts with version-number (2 bytes), operation-id (2 bytes), request-id (4 bytes)
-                        // Document data follows the IPP attributes section
-                        val headerSize = 8 // version (2) + operation (2) + request-id (4)
-                        var ippEndIndex = requestBytes.size
-                        
-                        // Assume document data starts after IPP data
-                        var documentData = ByteArray(0)
-                        
-                        // Parse the IPP packet
-                        val ippRequest = IppInputStream(requestBytes.inputStream()).readPacket()
-                        Log.d(TAG, "Received IPP request: ${ippRequest.code}")
-                        
-                        // For Print-Job and Send-Document, extract document data
-                        if (ippRequest.code == Operation.printJob.code || 
-                            ippRequest.code == Operation.sendDocument.code) {
+                // Handle both standard IPP path and root path for compatibility
+                listOf("/ipp/print", "/").forEach { path ->
+                    post(path) {
+                        try {
+                            // Read the entire request body first
+                            val requestBytes = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                                call.receiveStream().readBytes()
+                            }
                             
-                            // Try to find the document data which follows the IPP attributes
-                            // These operations have document content after the IPP data
-                            documentData = extractDocumentContent(requestBytes)
+                            // Parse document data vs IPP header
+                            // IPP starts with version-number (2 bytes), operation-id (2 bytes), request-id (4 bytes)
+                            // Document data follows the IPP attributes section
+                            val headerSize = 8 // version (2) + operation (2) + request-id (4)
+                            var ippEndIndex = requestBytes.size
+                            
+                            // Assume document data starts after IPP data
+                            var documentData = ByteArray(0)
+                            
+                            // Parse the IPP packet
+                            val ippRequest = IppInputStream(requestBytes.inputStream()).readPacket()
+                            Log.d(TAG, "Received IPP request on path $path: ${ippRequest.code}")
+                            
+                            // For Print-Job and Send-Document, extract document data
+                            if (ippRequest.code == Operation.printJob.code || 
+                                ippRequest.code == Operation.sendDocument.code) {
+                                
+                                // Try to find the document data which follows the IPP attributes
+                                // These operations have document content after the IPP data
+                                documentData = extractDocumentContent(requestBytes)
+                            }
+                            
+                            // Process the IPP request and prepare a response
+                            val response = processIppRequest(ippRequest, documentData, call)
+                            
+                            // Send the response
+                            val outputStream = ByteArrayOutputStream()
+                            val ippOutputStream = IppOutputStream(outputStream)
+                            ippOutputStream.write(response)
+                            
+                            call.respondBytes(
+                                outputStream.toByteArray(),
+                                ContentType("application", "ipp")
+                            )
+                        } catch (e: Exception) {
+                            Log.e(TAG, "Error processing IPP request on path $path", e)
+                            call.respond(HttpStatusCode.InternalServerError, "Error processing print request")
                         }
-                        
-                        // Process the IPP request and prepare a response
-                        val response = processIppRequest(ippRequest, documentData, call)
-                        
-                        // Send the response
-                        val outputStream = ByteArrayOutputStream()
-                        IppOutputStream(outputStream).write(response)
-                        call.respondBytes(
-                            outputStream.toByteArray(),
-                            ContentType("application", "ipp")
-                        )
-                    } catch (e: Exception) {
-                        Log.e(TAG, "Error processing IPP request", e)
-                        call.respond(HttpStatusCode.InternalServerError, "Error processing print request")
                     }
                 }
                 
                 get("/") {
                     call.respondText("${getPrinterName()} Service Running", ContentType.Text.Plain)
+                }
+                
+                get("/ipp/print") {
+                    call.respondText("${getPrinterName()} IPP Service Running", ContentType.Text.Plain)
                 }
             }
         }
@@ -524,7 +533,7 @@ class PrinterService(private val context: Context) {
             URI.create("ipp://127.0.0.1:$PORT/")
         }
         
-        // Create printer attributes group
+        // Create printer attributes group with all required IPP attributes
         val printerAttributes = AttributeGroup.groupOf(
             Tag.printerAttributes,
             // Basic printer information
@@ -537,6 +546,30 @@ class PrinterService(private val context: Context) {
             Types.printerInfo.of("${getPrinterName()} - Mobile PDF Printer"),
             Types.printerMakeAndModel.of("${getPrinterName()} v1.0"),
             
+            // Required printer attributes for IPP compliance
+            Types.printerUpTime.of(System.currentTimeMillis().toInt() / 1000), // Uptime in seconds since boot
+            Types.printerUriSupported.of(printerUri),
+            Types.queuedJobCount.of(0), // Number of jobs currently queued
+            
+            // Charset and language support (required by RFC 8011)
+            Types.charsetConfigured.of("utf-8"),
+            Types.charsetSupported.of("utf-8"),
+            Types.naturalLanguageConfigured.of("en"),
+            Types.generatedNaturalLanguageSupported.of("en"),
+            
+            // IPP version support (required)
+            Types.ippVersionsSupported.of("1.1", "2.0"),
+            
+            // Security and authentication (required)
+            Types.uriSecuritySupported.of("none"),
+            Types.uriAuthenticationSupported.of("none"),
+            
+            // Compression support (required)
+            Types.compressionSupported.of("none"),
+            
+            // PDL override support (required)
+            Types.pdlOverrideSupported.of("not-attempted"),
+            
             // Supported document formats
             Types.documentFormatSupported.of(
                 "application/pdf", 
@@ -548,6 +581,7 @@ class PrinterService(private val context: Context) {
                 "text/plain"
             ),
             Types.documentFormat.of("application/pdf"),
+            Types.documentFormatDefault.of("application/pdf"),
             
             // Media support
             Types.mediaDefault.of("iso_a4_210x297mm"),
@@ -593,6 +627,14 @@ class PrinterService(private val context: Context) {
         try {
             // Log incoming document format
             Log.d(TAG, "Saving document with format: $documentFormat and size: ${docBytes.size} bytes")
+            
+            // First, try to extract actual document content from IPP wrapper
+            val extractedContent = extractDocumentFromIPP(docBytes)
+            if (extractedContent != null) {
+                Log.d(TAG, "Successfully extracted document content (${extractedContent.size} bytes) from IPP wrapper")
+                saveExtractedDocument(extractedContent, jobId, documentFormat)
+                return
+            }
             
             // Try to find PDF signature in bytes (%PDF)
             var isPdf = false
@@ -809,6 +851,7 @@ class PrinterService(private val context: Context) {
                 val attributes = mapOf(
                     "URF" to "none",
                     "adminurl" to "http://$hostAddress:$PORT/",
+                    "rp" to "ipp/print", // Resource path for IPP
                     "pdl" to "application/pdf,image/urf",
                     "txtvers" to "1",
                     "priority" to "30",
@@ -883,5 +926,205 @@ class PrinterService(private val context: Context) {
         }
         // Explicitly return a valid placeholder IPv4 address
         return "127.0.0.1"
+    }
+    
+    /**
+     * Extracts actual document content from IPP wrapper
+     */
+    private fun extractDocumentFromIPP(ippData: ByteArray): ByteArray? {
+        try {
+            Log.d(TAG, "Attempting to extract document from IPP wrapper (${ippData.size} bytes)")
+            
+            // Look for common document signatures within the IPP data
+            val signatures = mapOf(
+                "PDF" to byteArrayOf('%'.toByte(), 'P'.toByte(), 'D'.toByte(), 'F'.toByte()),
+                "JPEG" to byteArrayOf(0xFF.toByte(), 0xD8.toByte(), 0xFF.toByte()),
+                "PNG" to byteArrayOf(0x89.toByte(), 0x50.toByte(), 0x4E.toByte(), 0x47.toByte(), 0x0D.toByte(), 0x0A.toByte(), 0x1A.toByte(), 0x0A.toByte()),
+                "PostScript" to byteArrayOf('%'.toByte(), '!'.toByte(), 'P'.toByte(), 'S'.toByte())
+            )
+            
+            for ((format, signature) in signatures) {
+                val position = findPattern(ippData, signature)
+                if (position >= 0) {
+                    Log.d(TAG, "Found $format signature at position $position")
+                    val extracted = ippData.copyOfRange(position, ippData.size)
+                    Log.d(TAG, "Extracted $format document: ${extracted.size} bytes")
+                    return extracted
+                }
+            }
+            
+            // If no signature found, try to find content after HTTP headers
+            val contentStart = findContentStart(ippData)
+            if (contentStart >= 0) {
+                Log.d(TAG, "Found content start at position $contentStart")
+                val extracted = ippData.copyOfRange(contentStart, ippData.size)
+                Log.d(TAG, "Extracted content after headers: ${extracted.size} bytes")
+                return extracted
+            }
+            
+            Log.w(TAG, "No document content found in IPP wrapper")
+            return null
+            
+        } catch (e: Exception) {
+            Log.e(TAG, "Error extracting document from IPP wrapper", e)
+            return null
+        }
+    }
+    
+    /**
+     * Finds the start of content after HTTP/IPP headers
+     */
+    private fun findContentStart(data: ByteArray): Int {
+        // Look for double CRLF which separates headers from content
+        val doubleCRLF = "\r\n\r\n".toByteArray()
+        val position = findPattern(data, doubleCRLF)
+        if (position >= 0) {
+            return position + doubleCRLF.size
+        }
+        
+        // Look for double LF
+        val doubleLF = "\n\n".toByteArray()
+        val position2 = findPattern(data, doubleLF)
+        if (position2 >= 0) {
+            return position2 + doubleLF.size
+        }
+        
+        return -1
+    }
+    
+    /**
+     * Finds a pattern in byte array
+     */
+    private fun findPattern(data: ByteArray, pattern: ByteArray): Int {
+        for (i in 0..(data.size - pattern.size)) {
+            var match = true
+            for (j in pattern.indices) {
+                if (data[i + j] != pattern[j]) {
+                    match = false
+                    break
+                }
+            }
+            if (match) return i
+        }
+        return -1
+    }
+    
+    /**
+     * Saves extracted document content
+     */
+    private fun saveExtractedDocument(content: ByteArray, jobId: Long, originalFormat: String) {
+        try {
+            // Determine the actual format based on content
+            val actualFormat = detectDocumentFormat(content)
+            val extension = when (actualFormat) {
+                "PDF" -> ".pdf"
+                "JPEG" -> ".jpg"
+                "PNG" -> ".png"
+                "PostScript" -> ".ps"
+                "EMF" -> ".emf"
+                "ZIP" -> ".zip"
+                "TEXT" -> ".txt"
+                "HTML" -> ".html"
+                else -> ".bin"
+            }
+            
+            val filename = "print_job_${jobId}${extension}"
+            val file = File(printJobsDirectory, filename)
+            
+            Log.d(TAG, "Saving extracted $actualFormat document (${content.size} bytes) to: ${file.absolutePath}")
+            
+            FileOutputStream(file).use { it.write(content) }
+            
+            if (file.exists() && file.length() > 0) {
+                // Notify that a new job was received
+                val intent = android.content.Intent("com.example.printer.NEW_PRINT_JOB")
+                intent.putExtra("job_path", file.absolutePath)
+                intent.putExtra("job_size", content.size)
+                intent.putExtra("job_id", jobId)
+                intent.putExtra("document_format", "application/${actualFormat.lowercase()}")
+                intent.putExtra("detected_format", actualFormat.lowercase())
+                Log.d(TAG, "Broadcasting extracted document notification: ${intent.action}")
+                context.sendBroadcast(intent)
+            }
+            
+        } catch (e: Exception) {
+            Log.e(TAG, "Error saving extracted document", e)
+        }
+    }
+    
+    /**
+     * Detects document format from content
+     */
+    private fun detectDocumentFormat(content: ByteArray): String {
+        if (content.size < 4) {
+            Log.d(TAG, "Content too small for format detection: ${content.size} bytes")
+            return "UNKNOWN"
+        }
+        
+        // Log first few bytes for debugging
+        val firstBytes = content.take(16).joinToString(" ") { "%02X".format(it) }
+        Log.d(TAG, "Format detection - First 16 bytes: $firstBytes")
+        
+        // Check for PDF
+        if (content[0] == '%'.toByte() && content[1] == 'P'.toByte() && 
+            content[2] == 'D'.toByte() && content[3] == 'F'.toByte()) {
+            Log.d(TAG, "Detected PDF format")
+            return "PDF"
+        }
+        
+        // Check for JPEG
+        if (content.size >= 3 && content[0] == 0xFF.toByte() && content[1] == 0xD8.toByte() && content[2] == 0xFF.toByte()) {
+            Log.d(TAG, "Detected JPEG format")
+            return "JPEG"
+        }
+        
+        // Check for PNG
+        if (content.size >= 8 && content[0] == 0x89.toByte() && content[1] == 0x50.toByte() && 
+            content[2] == 0x4E.toByte() && content[3] == 0x47.toByte()) {
+            Log.d(TAG, "Detected PNG format")
+            return "PNG"
+        }
+        
+        // Check for EMF (Windows Enhanced Metafile)
+        if (content.size >= 4 && content[0] == 0x24.toByte() && content[1] == 0x00.toByte() &&
+            content[2] == 0x00.toByte() && content[3] == 0x00.toByte()) {
+            Log.d(TAG, "Detected EMF format")
+            return "EMF"
+        }
+        
+        // Check for PostScript
+        if (content[0] == '%'.toByte() && content[1] == '!'.toByte() && 
+            content[2] == 'P'.toByte() && content[3] == 'S'.toByte()) {
+            Log.d(TAG, "Detected PostScript format")
+            return "PostScript"
+        }
+        
+        // Check for ZIP (Office documents, etc.)
+        if (content.size >= 4 && content[0] == 0x50.toByte() && content[1] == 0x4B.toByte() && 
+            content[2] == 0x03.toByte() && content[3] == 0x04.toByte()) {
+            Log.d(TAG, "Detected ZIP format (possible Office document)")
+            return "ZIP"
+        }
+        
+        // Check for plain text
+        val printableCount = content.take(minOf(100, content.size)).count { byte ->
+            (byte >= 0x20.toByte() && byte <= 0x7E.toByte()) || 
+            byte == 0x09.toByte() || byte == 0x0A.toByte() || byte == 0x0D.toByte()
+        }
+        val printableRatio = printableCount.toDouble() / minOf(100, content.size)
+        if (printableRatio > 0.8) {
+            Log.d(TAG, "Detected plain text format (printable ratio: $printableRatio)")
+            return "TEXT"
+        }
+        
+        // Check for HTML
+        val headerString = String(content, 0, minOf(100, content.size)).lowercase()
+        if (headerString.contains("<html") || headerString.contains("<!doctype html")) {
+            Log.d(TAG, "Detected HTML format")
+            return "HTML"
+        }
+        
+        Log.w(TAG, "Could not detect format. Printable ratio: $printableRatio")
+        return "UNKNOWN"
     }
 } 

@@ -8,10 +8,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -23,7 +20,10 @@ import com.example.printer.printer.PrinterService
 import com.example.printer.settings.SettingsScreen
 import com.example.printer.ui.theme.PrinterTheme
 import com.example.printer.utils.FileUtils
+import com.example.printer.utils.DocumentConverter
+import com.example.printer.utils.DocumentDiagnostics
 import com.example.printer.utils.PreferenceUtils
+import android.util.Log
 import kotlinx.coroutines.delay
 import java.io.File
 
@@ -146,27 +146,72 @@ class MainActivity : ComponentActivity() {
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MainNavigation(printerService: PrinterService) {
     var currentScreen by remember { mutableStateOf("main") }
     
-    when (currentScreen) {
-        "main" -> PrinterApp(
-            printerService = printerService,
-            onSettingsClick = { currentScreen = "settings" }
-        )
-        "settings" -> SettingsScreen(
-            printerService = printerService,
-            onBackClick = { currentScreen = "main" }
-        )
+    Scaffold(
+        bottomBar = {
+            NavigationBar {
+                NavigationBarItem(
+                    icon = { Icon(Icons.Default.Home, contentDescription = null) },
+                    label = { Text("Printer") },
+                    selected = currentScreen == "main",
+                    onClick = { currentScreen = "main" }
+                )
+                NavigationBarItem(
+                    icon = { Icon(Icons.Default.List, contentDescription = null) },
+                    label = { Text("Jobs") },
+                    selected = currentScreen == "jobs",
+                    onClick = { currentScreen = "jobs" }
+                )
+                NavigationBarItem(
+                    icon = { Icon(Icons.Default.Info, contentDescription = null) },
+                    label = { Text("Logs") },
+                    selected = currentScreen == "logs",
+                    onClick = { currentScreen = "logs" }
+                )
+                NavigationBarItem(
+                    icon = { Icon(Icons.Default.Build, contentDescription = null) },
+                    label = { Text("Plugins") },
+                    selected = currentScreen == "plugins",
+                    onClick = { currentScreen = "plugins" }
+                )
+                NavigationBarItem(
+                    icon = { Icon(Icons.Default.Settings, contentDescription = null) },
+                    label = { Text("Settings") },
+                    selected = currentScreen == "settings",
+                    onClick = { currentScreen = "settings" }
+                )
+            }
+        }
+    ) { paddingValues ->
+        Box(modifier = Modifier.padding(paddingValues)) {
+            when (currentScreen) {
+                "main" -> PrinterApp(printerService = printerService)
+                "settings" -> SettingsScreen(
+                    printerService = printerService,
+                    onBackClick = { currentScreen = "main" }
+                )
+                "jobs" -> com.example.printer.ui.JobManagementScreen(
+                    onBackClick = { currentScreen = "main" }
+                )
+                "logs" -> com.example.printer.ui.LogsScreen(
+                    onBackClick = { currentScreen = "main" }
+                )
+                "plugins" -> com.example.printer.ui.PluginManagementScreen(
+                    onBackClick = { currentScreen = "main" }
+                )
+            }
+        }
     }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PrinterApp(
-    printerService: PrinterService,
-    onSettingsClick: () -> Unit
+    printerService: PrinterService
 ) {
     val context = LocalContext.current
     var isServiceRunning by remember { mutableStateOf(false) }
@@ -247,14 +292,6 @@ fun PrinterApp(
                         text = PreferenceUtils.getCustomPrinterName(context),
                         style = MaterialTheme.typography.titleLarge
                     ) 
-                },
-                actions = {
-                    IconButton(onClick = onSettingsClick) {
-                        Icon(
-                            imageVector = Icons.Default.Settings,
-                            contentDescription = "Settings"
-                        )
-                    }
                 }
             )
         }
@@ -465,7 +502,21 @@ fun PrintJobItem(
             ) {
                 Button(
                     onClick = {
-                        FileUtils.openPdfFile(context, file)
+                        // First analyze the document for debugging
+                        val analysis = DocumentDiagnostics.analyzeDocument(file)
+                        Log.d("DocumentDebug", "File: ${file.name}")
+                        Log.d("DocumentDebug", "Content Type: ${analysis.contentType}")
+                        Log.d("DocumentDebug", "Valid Document: ${analysis.isValidDocument}")
+                        Log.d("DocumentDebug", "Signatures: ${analysis.signatures}")
+                        Log.d("DocumentDebug", "Embedded Docs: ${analysis.embeddedDocuments}")
+                        Log.d("DocumentDebug", "Header (first 32 bytes): ${analysis.headerHex}")
+                        
+                        // Try advanced document converter
+                        val success = DocumentConverter.openDocument(context, file)
+                        if (!success) {
+                            // Fallback to original method
+                            FileUtils.openPdfFile(context, file)
+                        }
                     },
                     modifier = Modifier
                         .padding(end = 8.dp)
