@@ -1,0 +1,13 @@
+[
+    {
+      "tag": "PRINTER_ATTRIBUTES",
+      "attributes": [
+        { "name": "printer-name", "value": "Android Virtual Printer", "type": "STRING" },
+        { "name": "printer-state", "value": "3", "type": "INTEGER" },
+        { "name": "printer-state-reasons", "value": "none", "type": "STRING" },
+        { "name": "printer-is-accepting-jobs", "value": "true", "type": "BOOLEAN" },
+        { "name": "printer-uri", "value": "ipp://192.168.1.12:8631/ipp/print", "type": "STRING" },
+        { "name": "document-format-supported", "value": "application/pdf", "type": "STRING" }
+      ]
+    }
+  ]

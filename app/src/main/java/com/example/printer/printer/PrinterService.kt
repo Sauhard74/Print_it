@@ -30,6 +30,10 @@ import java.net.NetworkInterface
 import java.util.*
 import java.net.URI
 import com.example.printer.utils.PreferenceUtils
+import com.example.printer.utils.IppAttributesUtils
+import com.example.printer.logging.PrinterLogger
+import com.example.printer.logging.LogCategory
+import com.example.printer.logging.LogLevel
 import java.io.FileOutputStream
 
 class PrinterService(private val context: Context) {
@@ -42,6 +46,7 @@ class PrinterService(private val context: Context) {
     private var registrationListener: NsdManager.RegistrationListener? = null
     private var server: ApplicationEngine? = null
     private var customIppAttributes: List<AttributeGroup>? = null
+    private val logger by lazy { PrinterLogger.getInstance(context) }
     
     // Add error simulation properties
     private var simulateErrorMode = false
@@ -53,6 +58,51 @@ class PrinterService(private val context: Context) {
         }
     }
     
+    /**
+     * Returns values of an attribute from the custom IPP attributes, if present
+     */
+    private fun getCustomAttributeValues(name: String): List<String> {
+        val groups = customIppAttributes ?: return emptyList()
+        val values = mutableListOf<String>()
+        groups.forEach { group ->
+            try {
+                val attr = group[name]
+                if (attr != null) {
+                    val count = attr.size
+                    if (count > 0) {
+                        for (i in 0 until count) {
+                            values.add(attr[i].toString())
+                        }
+                    } else {
+                        attr.getValue()?.let { values.add(it.toString()) }
+                    }
+                }
+            } catch (_: Exception) {}
+        }
+        return values
+    }
+
+    /**
+     * Checks printer-is-accepting-jobs from custom attributes
+     */
+    private fun isAcceptingJobsAccordingToCustomAttributes(): Boolean {
+        val groups = customIppAttributes ?: return true
+        groups.forEach { group ->
+            try {
+                val attr = group[Types.printerIsAcceptingJobs]
+                val v = attr?.getValue() as? Boolean
+                if (v != null) return v
+            } catch (_: Exception) {}
+            try {
+                val generic = group["printer-is-accepting-jobs"]
+                val v = generic?.toString()?.equals("true", true)
+                if (v == true) return true
+                if (v == false) return false
+            } catch (_: Exception) {}
+        }
+        return true
+    }
+
     fun getPrinterName(): String {
         return PreferenceUtils.getCustomPrinterName(context)
     }
@@ -130,6 +180,12 @@ class PrinterService(private val context: Context) {
                             // Parse the IPP packet
                             val ippRequest = IppInputStream(requestBytes.inputStream()).readPacket()
                             Log.d(TAG, "Received IPP request on path $path: ${ippRequest.code}")
+                            logger.d(LogCategory.IPP_PROTOCOL, TAG, "Request ${ippRequest.operation?.name} on $path",
+                                metadata = mapOf(
+                                    "requestId" to ippRequest.requestId,
+                                    "groups" to ippRequest.attributeGroups.size
+                                )
+                            )
                             
                             // For Print-Job and Send-Document, extract document data
                             if (ippRequest.code == Operation.printJob.code || 
@@ -152,8 +208,10 @@ class PrinterService(private val context: Context) {
                                 outputStream.toByteArray(),
                                 ContentType("application", "ipp")
                             )
+                            logger.i(LogCategory.IPP_PROTOCOL, TAG, "Responded ${response.status} for ${ippRequest.operation?.name}")
                         } catch (e: Exception) {
                             Log.e(TAG, "Error processing IPP request on path $path", e)
+                            logger.e(LogCategory.IPP_PROTOCOL, TAG, "IPP processing error on $path", e)
                             call.respond(HttpStatusCode.InternalServerError, "Error processing print request")
                         }
                     }
@@ -308,6 +366,11 @@ class PrinterService(private val context: Context) {
         return when (request.code) {
             Operation.printJob.code -> { // Print-Job operation
                 try {
+                    // Respect custom attributes if provided
+                    if (!isAcceptingJobsAccordingToCustomAttributes()) {
+                        Log.w(TAG, "Rejecting Print-Job: printer-is-accepting-jobs=false from custom attributes")
+                        return IppPacket(Status.serverErrorServiceUnavailable, request.requestId)
+                    }
                     // Check if there's document data
                     val headersList = call.request.headers.entries().map { "${it.key}: ${it.value}" }
                     Log.d(TAG, "Print job headers: ${headersList.joinToString(", ")}")
@@ -331,8 +394,9 @@ class PrinterService(private val context: Context) {
                         Log.d(TAG, "macOS client detected, treating document as PDF by default")
                     }
                     
-                    // Check supported document formats
-                    val supportedFormats = listOf(
+                    // Check supported document formats (use custom list if provided)
+                    val customSupported = getCustomAttributeValues("document-format-supported")
+                    val supportedFormats = if (customSupported.isNotEmpty()) customSupported else listOf(
                         "application/octet-stream",
                         "application/pdf",
                         "application/postscript",
@@ -345,11 +409,16 @@ class PrinterService(private val context: Context) {
                     
                     if (documentFormat !in supportedFormats) {
                         Log.w(TAG, "Unsupported document format: $documentFormat")
-                        // Continue anyway, as we'll try to handle it
+                        logger.w(LogCategory.IPP_PROTOCOL, TAG, "Rejected document format $documentFormat; supported=$supportedFormats")
+                        // If custom attributes are set, enforce the constraint; otherwise, continue
+                        if (customIppAttributes != null) {
+                            return IppPacket(Status.clientErrorDocumentFormatNotSupported, request.requestId)
+                        }
                     }
                     
                     if (documentData.isNotEmpty()) {
                         Log.d(TAG, "Received document data: ${documentData.size} bytes")
+                        logger.d(LogCategory.DOCUMENT_PROCESSING, TAG, "Received document data", metadata = mapOf("bytes" to documentData.size))
                         
                         // Generate a unique job ID
                         val jobId = System.currentTimeMillis()
@@ -374,10 +443,13 @@ class PrinterService(private val context: Context) {
                                 Types.jobStateReasons.of("processing-to-stop-point")
                             )
                         )
+                        logger.i(LogCategory.PRINT_JOB, TAG, "Accepted Print-Job", jobId = jobId,
+                            metadata = mapOf("format" to documentFormat))
                         
                         response
                     } else {
                         Log.e(TAG, "No document data found in Print-Job request")
+                        logger.e(LogCategory.PRINT_JOB, TAG, "No document data in Print-Job")
                         IppPacket(Status.clientErrorBadRequest, request.requestId)
                     }
                 } catch (e: Exception) {
@@ -387,6 +459,10 @@ class PrinterService(private val context: Context) {
             }
             Operation.sendDocument.code -> { // Send-Document operation
                 try {
+                    if (!isAcceptingJobsAccordingToCustomAttributes()) {
+                        Log.w(TAG, "Rejecting Send-Document: printer-is-accepting-jobs=false from custom attributes")
+                        return IppPacket(Status.serverErrorServiceUnavailable, request.requestId)
+                    }
                     Log.d(TAG, "Received Send-Document operation")
                     
                     // Print all headers for debugging
@@ -453,6 +529,7 @@ class PrinterService(private val context: Context) {
                         response
                     } else {
                         Log.e(TAG, "No document data found in Send-Document request")
+                        logger.e(LogCategory.PRINT_JOB, TAG, "No document data in Send-Document", jobId = jobId?.toLong())
                         IppPacket(Status.clientErrorBadRequest, request.requestId)
                     }
                 } catch (e: Exception) {

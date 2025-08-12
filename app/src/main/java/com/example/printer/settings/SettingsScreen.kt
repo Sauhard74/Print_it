@@ -63,7 +63,17 @@ fun SettingsScreen(
     val importLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
-        uri?.let { handleImportAttributes(context, it, printerService) }
+        uri?.let { selectedUri ->
+            handleImportAttributes(
+                context = context,
+                uri = selectedUri,
+                printerService = printerService
+            ) { savedFilename ->
+                // refresh state so the new file appears and is selected
+                availableAttributeFiles = IppAttributesUtils.getAvailableIppAttributeFiles(context)
+                selectedAttributesFile = savedFilename
+            }
+        }
     }
     
     // File picker launcher for exporting attributes
@@ -832,7 +842,12 @@ fun SettingsScreen(
     }
 }
 
-private fun handleImportAttributes(context: android.content.Context, uri: Uri, printerService: PrinterService) {
+private fun handleImportAttributes(
+    context: android.content.Context,
+    uri: Uri,
+    printerService: PrinterService,
+    onSaved: (String) -> Unit
+) {
     try {
         context.contentResolver.openInputStream(uri)?.use { inputStream ->
             val jsonString = inputStream.bufferedReader().use { it.readText() }
@@ -878,6 +893,7 @@ private fun handleImportAttributes(context: android.content.Context, uri: Uri, p
                 val filename = "ipp_attributes_${System.currentTimeMillis()}.json"
                 if (IppAttributesUtils.saveIppAttributes(context, attributes, filename)) {
                     printerService.setCustomIppAttributes(attributes)
+                    onSaved(filename)
                     android.widget.Toast.makeText(
                         context,
                         "IPP attributes imported successfully",

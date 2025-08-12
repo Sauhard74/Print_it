@@ -67,25 +67,33 @@ object IppAttributesUtils {
      */
     fun getAttributesFromGroup(group: AttributeGroup): List<Attribute<*>> {
         val result = mutableListOf<Attribute<*>>()
-        // Use safe accessor for attributes based on JIPP library structure
+        // Try reflection path first for native JIPP implementations
         try {
-            // For newer JIPP versions
             val attributesField = AttributeGroup::class.java.getDeclaredField("attributes")
             attributesField.isAccessible = true
             val attributesValue = attributesField.get(group)
-            
             if (attributesValue is Collection<*>) {
                 for (attr in attributesValue) {
-                    if (attr is Attribute<*>) {
-                        result.add(attr)
-                    }
+                    if (attr is Attribute<*>) result.add(attr)
                 }
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Error accessing attributes in AttributeGroup", e)
-            // Fallback empty list
+            // Many of our AttributeGroup instances are custom (created via createAttributeGroup),
+            // which don't expose a backing "attributes" field. In that case, fall back to using
+            // the public iterator to collect attributes.
+            Log.d(TAG, "Falling back to iterator for AttributeGroup access")
         }
-        
+
+        if (result.isEmpty()) {
+            try {
+                for (attr in group) {
+                    if (attr is Attribute<*>) result.add(attr)
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Unable to iterate attributes in AttributeGroup", e)
+            }
+        }
+
         return result
     }
     
