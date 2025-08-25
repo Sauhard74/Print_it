@@ -19,39 +19,233 @@ object FileUtils {
      */
     fun getSavedPrintJobs(context: Context): List<File> {
         val printJobsDir = File(context.filesDir, "print_jobs")
+        Log.d(TAG, "Looking for print jobs in: ${printJobsDir.absolutePath}")
+        
         if (!printJobsDir.exists()) {
+            Log.d(TAG, "Print jobs directory doesn't exist, creating it")
             printJobsDir.mkdirs()
             return emptyList()
         }
         
-        return printJobsDir.listFiles()?.filter { it.isFile }?.sortedByDescending { it.lastModified() } ?: emptyList()
+        val files = printJobsDir.listFiles()?.filter { it.isFile }?.sortedByDescending { it.lastModified() } ?: emptyList()
+        Log.d(TAG, "Found ${files.size} print jobs")
+        files.forEach { file ->
+            Log.d(TAG, "Print job: ${file.name}, size: ${file.length()} bytes, last modified: ${formatTimestamp(file.lastModified())}")
+        }
+        
+        return files
     }
     
     /**
-     * Opens a PDF file using an external PDF viewer app
+     * Opens a file using appropriate viewer app based on file extension
      */
     fun openPdfFile(context: Context, file: File) {
         try {
-            val uri = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                // For Android 7.0+ (API level 24+), we need to use FileProvider
-                FileProvider.getUriForFile(
+            // Check if file exists
+            if (!file.exists() || file.length() <= 0) {
+                Log.e(TAG, "File does not exist or is empty: ${file.absolutePath}")
+                android.widget.Toast.makeText(
                     context,
-                    "${context.packageName}.fileprovider",
-                    file
-                )
-            } else {
-                // For older Android versions
-                Uri.fromFile(file)
+                    "File does not exist or is empty",
+                    android.widget.Toast.LENGTH_LONG
+                ).show()
+                return
+            }
+
+            // First perform a deep check to verify if it's a valid PDF
+            val isPdfFile = verifyPdfStructure(file)
+            Log.d(TAG, "File ${file.name} is valid PDF: $isPdfFile")
+            
+            // If file has .raw extension and contains PDF data, make a copy with .pdf extension
+            if (file.name.endsWith(".raw", ignoreCase = true) && isPdfFile) {
+                val pdfFile = createPdfCopy(context, file)
+                if (pdfFile != null) {
+                    Log.d(TAG, "Created PDF copy at: ${pdfFile.absolutePath}")
+                    // Continue with the new PDF file
+                    openFileWithProperIntent(context, pdfFile, "application/pdf")
+                    return
+                }
             }
             
-            val intent = Intent(Intent.ACTION_VIEW).apply {
-                setDataAndType(uri, "application/pdf")
-                flags = Intent.FLAG_ACTIVITY_NO_HISTORY or Intent.FLAG_GRANT_READ_URI_PERMISSION
+            // Determine MIME type based on detected content and file extension
+            val fileType = if (isPdfFile) "PDF" else detectFileType(file)
+            
+            val mimeType = when {
+                isPdfFile || file.name.endsWith(".pdf", ignoreCase = true) -> "application/pdf"
+                fileType == "JPEG" -> "image/jpeg"
+                fileType == "PNG" -> "image/png"
+                file.name.endsWith(".raw", ignoreCase = true) -> "application/octet-stream"
+                else -> "application/pdf" // Default to PDF
             }
             
-            context.startActivity(intent)
+            openFileWithProperIntent(context, file, mimeType)
         } catch (e: Exception) {
-            Log.e(TAG, "Error opening PDF file", e)
+            Log.e(TAG, "Error opening file", e)
+            
+            // Show a toast to the user
+            android.widget.Toast.makeText(
+                context,
+                "Unable to open file. Error: ${e.message}",
+                android.widget.Toast.LENGTH_LONG
+            ).show()
+        }
+    }
+    
+    /**
+     * Creates a PDF copy of a file if it contains PDF data but has wrong extension
+     */
+    private fun createPdfCopy(context: Context, file: File): File? {
+        return try {
+            val printJobsDir = File(context.filesDir, "print_jobs")
+            val pdfFile = File(printJobsDir, file.nameWithoutExtension + ".pdf")
+            
+            file.inputStream().use { input ->
+                pdfFile.outputStream().use { output ->
+                    input.copyTo(output)
+                }
+            }
+            
+            if (pdfFile.exists() && pdfFile.length() > 0) {
+                return pdfFile
+            }
+            
+            null
+        } catch (e: Exception) {
+            Log.e(TAG, "Error creating PDF copy", e)
+            null
+        }
+    }
+    
+    /**
+     * Performs deeper verification of PDF structure beyond just checking the header
+     */
+    private fun verifyPdfStructure(file: File): Boolean {
+        return try {
+            file.inputStream().use { stream ->
+                val buffer = ByteArray(1024)
+                val bytesRead = stream.read(buffer, 0, buffer.size)
+                
+                if (bytesRead < 4) return false
+                
+                // Check for PDF header
+                val hasPdfHeader = buffer[0] == '%'.toByte() && 
+                                  buffer[1] == 'P'.toByte() && 
+                                  buffer[2] == 'D'.toByte() && 
+                                  buffer[3] == 'F'.toByte()
+                
+                if (!hasPdfHeader) return false
+                
+                // Look for key PDF structural elements in the first 1024 bytes
+                val content = String(buffer, 0, bytesRead)
+                
+                // Check for common PDF elements
+                val hasObject = content.contains(" obj") || content.contains("\nobj")
+                val hasXref = content.contains("xref")
+                val hasTrailer = content.contains("trailer")
+                
+                // If it has PDF header and at least one structural element, consider it a valid PDF
+                hasPdfHeader && (hasObject || hasXref || hasTrailer)
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error verifying PDF structure", e)
+            false
+        }
+    }
+    
+    private fun openFileWithProperIntent(context: Context, file: File, mimeType: String) {
+        val uri = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            // For Android 7.0+ (API level 24+), we need to use FileProvider
+            FileProvider.getUriForFile(
+                context,
+                "${context.packageName}.fileprovider",
+                file
+            )
+        } else {
+            // For older Android versions
+            Uri.fromFile(file)
+        }
+        
+        Log.d(TAG, "Opening file ${file.name} with MIME type: $mimeType")
+        
+        // Create an intent to view the file
+        val intent = Intent(Intent.ACTION_VIEW).apply {
+            setDataAndType(uri, mimeType)
+            flags = Intent.FLAG_ACTIVITY_NEW_DOCUMENT or 
+                   Intent.FLAG_GRANT_READ_URI_PERMISSION
+            addCategory(Intent.CATEGORY_OPENABLE)
+        }
+        
+        // Try to start an activity to view the file
+        if (intent.resolveActivity(context.packageManager) != null) {
+            context.startActivity(intent)
+        } else {
+            // Fallback - try with generic MIME type
+            Log.d(TAG, "No app to handle $mimeType, trying generic viewer")
+            val fallbackIntent = Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(uri, "*/*")
+                flags = Intent.FLAG_ACTIVITY_NEW_DOCUMENT or 
+                       Intent.FLAG_GRANT_READ_URI_PERMISSION
+            }
+            
+            try {
+                context.startActivity(fallbackIntent)
+            } catch (e: Exception) {
+                Log.e(TAG, "Error opening file with fallback intent", e)
+                android.widget.Toast.makeText(
+                    context,
+                    "Unable to open file. No compatible app found.",
+                    android.widget.Toast.LENGTH_LONG
+                ).show()
+            }
+        }
+    }
+    
+    /**
+     * Detects the file type by reading its signature/magic number
+     * @return String representing the file type (PDF, JPEG, PNG, or UNKNOWN)
+     */
+    private fun detectFileType(file: File): String {
+        return try {
+            file.inputStream().use { stream ->
+                val header = ByteArray(8)  // Most signatures are within the first 8 bytes
+                val bytesRead = stream.read(header, 0, header.size)
+                
+                if (bytesRead >= 4) {
+                    // Check for PDF signature (%PDF)
+                    if (header[0] == 0x25.toByte() && header[1] == 0x50.toByte() && 
+                        header[2] == 0x44.toByte() && header[3] == 0x46.toByte()) {
+                        return "PDF"
+                    }
+                    
+                    // Check for JPEG signature (JFIF, Exif)
+                    if (header[0] == 0xFF.toByte() && header[1] == 0xD8.toByte() && 
+                        header[2] == 0xFF.toByte()) {
+                        return "JPEG"
+                    }
+                    
+                    // Check for PNG signature
+                    if (bytesRead >= 8 && 
+                        header[0] == 0x89.toByte() && header[1] == 0x50.toByte() && 
+                        header[2] == 0x4E.toByte() && header[3] == 0x47.toByte() && 
+                        header[4] == 0x0D.toByte() && header[5] == 0x0A.toByte() && 
+                        header[6] == 0x1A.toByte() && header[7] == 0x0A.toByte()) {
+                        return "PNG"
+                    }
+                }
+                
+                // If no known signature is found, try to determine by extension
+                when {
+                    file.name.endsWith(".pdf", ignoreCase = true) -> "PDF"
+                    file.name.endsWith(".jpg", ignoreCase = true) || 
+                        file.name.endsWith(".jpeg", ignoreCase = true) -> "JPEG"
+                    file.name.endsWith(".png", ignoreCase = true) -> "PNG"
+                    file.name.endsWith(".raw", ignoreCase = true) -> "RAW"
+                    else -> "UNKNOWN"
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error detecting file type", e)
+            "UNKNOWN"
         }
     }
     
@@ -107,17 +301,44 @@ object FileUtils {
      */
     fun getReadableName(file: File): String {
         val fileName = file.name
-        // Remove timestamp part and extension if possible
-        return when {
-            fileName.startsWith("print-job-") -> {
-                val timestamp = fileName.substringAfter("print-job-").substringBefore(".pdf")
-                try {
-                    "Print Job (${formatTimestamp(timestamp.toLong())})"
-                } catch (e: Exception) {
-                    fileName
+        
+        // Check if it matches our new naming pattern
+        if (fileName.startsWith("print_job_")) {
+            try {
+                // Extract timestamp and extension
+                val regex = "print_job_(\\d+)\\.(\\w+)".toRegex()
+                val matchResult = regex.find(fileName)
+                
+                if (matchResult != null) {
+                    val (timestamp, extension) = matchResult.destructured
+                    val formattedTime = formatTimestamp(timestamp.toLong())
+                    return "Print Job ($formattedTime).$extension"
                 }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error parsing filename: $fileName", e)
             }
-            else -> fileName
         }
+        
+        // Legacy naming pattern
+        if (fileName.startsWith("print-job-")) {
+            try {
+                val timestamp = fileName.substringAfter("print-job-").substringBefore(".")
+                return "Print Job (${formatTimestamp(timestamp.toLong())})"
+            } catch (e: Exception) {
+                // Fall back to filename
+            }
+        }
+        
+        // Legacy data files with format in the name
+        if (fileName.contains("application_") && fileName.endsWith(".data")) {
+            try {
+                val timestamp = fileName.substringAfter("print_job_").substringBefore("_application")
+                return "Print Job (${formatTimestamp(timestamp.toLong())})"
+            } catch (e: Exception) {
+                // Fall back to filename
+            }
+        }
+        
+        return fileName
     }
 } 
