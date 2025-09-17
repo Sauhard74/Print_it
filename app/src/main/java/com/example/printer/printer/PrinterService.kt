@@ -90,7 +90,7 @@ class PrinterService(private val context: Context) {
         groups.forEach { group ->
             try {
                 val attr = group[Types.printerIsAcceptingJobs]
-                val v = attr?.getValue() as? Boolean
+                val v = attr?.getValue()
                 if (v != null) return v
             } catch (_: Exception) {}
             try {
@@ -168,19 +168,13 @@ class PrinterService(private val context: Context) {
                                 call.receiveStream().readBytes()
                             }
                             
-                            // Parse document data vs IPP header
-                            // IPP starts with version-number (2 bytes), operation-id (2 bytes), request-id (4 bytes)
-                            // Document data follows the IPP attributes section
-                            val headerSize = 8 // version (2) + operation (2) + request-id (4)
-                            var ippEndIndex = requestBytes.size
-                            
                             // Assume document data starts after IPP data
                             var documentData = ByteArray(0)
                             
                             // Parse the IPP packet
                             val ippRequest = IppInputStream(requestBytes.inputStream()).readPacket()
                             Log.d(TAG, "Received IPP request on path $path: ${ippRequest.code}")
-                            logger.d(LogCategory.IPP_PROTOCOL, TAG, "Request ${ippRequest.operation?.name} on $path",
+                            logger.d(LogCategory.IPP_PROTOCOL, TAG, "Request ${ippRequest.operation.name} on $path",
                                 metadata = mapOf(
                                     "requestId" to ippRequest.requestId,
                                     "groups" to ippRequest.attributeGroups.size
@@ -208,7 +202,7 @@ class PrinterService(private val context: Context) {
                                 outputStream.toByteArray(),
                                 ContentType("application", "ipp")
                             )
-                            logger.i(LogCategory.IPP_PROTOCOL, TAG, "Responded ${response.status} for ${ippRequest.operation?.name}")
+                            logger.i(LogCategory.IPP_PROTOCOL, TAG, "Responded ${response.status} for ${ippRequest.operation.name}")
                         } catch (e: Exception) {
                             Log.e(TAG, "Error processing IPP request on path $path", e)
                             logger.e(LogCategory.IPP_PROTOCOL, TAG, "IPP processing error on $path", e)
@@ -240,10 +234,10 @@ class PrinterService(private val context: Context) {
             
             // First try: Look for PDF signature throughout the data
             for (i in 0 until requestBytes.size - 4) {
-                if (requestBytes[i] == '%'.toByte() && 
-                    requestBytes[i+1] == 'P'.toByte() && 
-                    requestBytes[i+2] == 'D'.toByte() && 
-                    requestBytes[i+3] == 'F'.toByte()) {
+                if (requestBytes[i] == '%'.code.toByte() && 
+                    requestBytes[i+1] == 'P'.code.toByte() && 
+                    requestBytes[i+2] == 'D'.code.toByte() && 
+                    requestBytes[i+3] == 'F'.code.toByte()) {
                     
                     val docBytes = requestBytes.copyOfRange(i, requestBytes.size)
                     Log.d(TAG, "Found PDF marker at position $i, extracted ${docBytes.size} bytes")
@@ -294,7 +288,7 @@ class PrinterService(private val context: Context) {
         documentData: ByteArray,
         call: ApplicationCall
     ): IppPacket {
-        Log.d(TAG, "Processing IPP request: ${request.code}, operation: ${request.operation?.name ?: "unknown"}")
+        Log.d(TAG, "Processing IPP request: ${request.code}, operation: ${request.operation.name}")
         
         // Check for error simulation before normal processing
         if (simulateErrorMode) {
@@ -476,7 +470,7 @@ class PrinterService(private val context: Context) {
                     val jobId = request.attributeGroups
                         .find { it.tag == Tag.operationAttributes }
                         ?.getValues(Types.jobId)
-                        ?.firstOrNull() as? Int
+                        ?.firstOrNull()
                     
                     // Get document format from attributes if available
                     val documentFormat = request.attributeGroups
@@ -496,7 +490,7 @@ class PrinterService(private val context: Context) {
                     val isLastDocument = request.attributeGroups
                         .find { it.tag == Tag.operationAttributes }
                         ?.getValues(Types.lastDocument)
-                        ?.firstOrNull() as? Boolean ?: true
+                        ?.firstOrNull() ?: true
                     
                     Log.d(TAG, "Send-Document for job ID: $jobId, format: $documentFormat, last document: $isLastDocument")
                     
@@ -709,7 +703,7 @@ class PrinterService(private val context: Context) {
             val extractedContent = extractDocumentFromIPP(docBytes)
             if (extractedContent != null) {
                 Log.d(TAG, "Successfully extracted document content (${extractedContent.size} bytes) from IPP wrapper")
-                saveExtractedDocument(extractedContent, jobId, documentFormat)
+                saveExtractedDocument(extractedContent, jobId)
                 return
             }
             
@@ -719,10 +713,10 @@ class PrinterService(private val context: Context) {
             
             // Search for PDF header
             for (i in 0 until docBytes.size - 4) {
-                if (docBytes[i] == '%'.toByte() && 
-                    docBytes[i + 1] == 'P'.toByte() && 
-                    docBytes[i + 2] == 'D'.toByte() && 
-                    docBytes[i + 3] == 'F'.toByte()) {
+                if (docBytes[i] == '%'.code.toByte() && 
+                    docBytes[i + 1] == 'P'.code.toByte() && 
+                    docBytes[i + 2] == 'D'.code.toByte() && 
+                    docBytes[i + 3] == 'F'.code.toByte()) {
                     isPdf = true
                     pdfStartIndex = i
                     Log.d(TAG, "Found PDF signature at position $i")
@@ -773,7 +767,7 @@ class PrinterService(private val context: Context) {
             
             if (isPrintableFormat) {
                 // Create a PDF wrapper for the content
-                val pdfWrapper = createPdfWrapper(docBytes, documentFormat)
+                val pdfWrapper = createPdfWrapper(docBytes)
                 val pdfFilename = "print_job_${jobId}.pdf"
                 val pdfFile = File(printJobsDirectory, pdfFilename)
                 
@@ -817,14 +811,14 @@ class PrinterService(private val context: Context) {
     /**
      * Creates a standard-compliant PDF wrapper around arbitrary data
      */
-    private fun createPdfWrapper(data: ByteArray, format: String): ByteArray {
+    private fun createPdfWrapper(data: ByteArray): ByteArray {
         try {
             // Check if it's already a PDF
             if (data.size > 4 &&
-                data[0] == '%'.toByte() && 
-                data[1] == 'P'.toByte() && 
-                data[2] == 'D'.toByte() && 
-                data[3] == 'F'.toByte()) {
+                data[0] == '%'.code.toByte() && 
+                data[1] == 'P'.code.toByte() && 
+                data[2] == 'D'.code.toByte() && 
+                data[3] == 'F'.code.toByte()) {
                 Log.d(TAG, "Data is already a valid PDF, returning as-is")
                 return data
             }
@@ -993,8 +987,8 @@ class PrinterService(private val context: Context) {
                 while (addresses.hasMoreElements()) {
                     val address = addresses.nextElement()
                     // Skip loopback addresses and IPv6 addresses (which cause URI issues)
-                    if (!address.isLoopbackAddress && address is InetAddress && !address.hostAddress.contains(":")) {
-                        return address.hostAddress
+                    if (!address.hostAddress!!.contains(":")) {
+                        return address.hostAddress!!
                     }
                 }
             }
@@ -1014,10 +1008,10 @@ class PrinterService(private val context: Context) {
             
             // Look for common document signatures within the IPP data
             val signatures = mapOf(
-                "PDF" to byteArrayOf('%'.toByte(), 'P'.toByte(), 'D'.toByte(), 'F'.toByte()),
+                "PDF" to byteArrayOf('%'.code.toByte(), 'P'.code.toByte(), 'D'.code.toByte(), 'F'.code.toByte()),
                 "JPEG" to byteArrayOf(0xFF.toByte(), 0xD8.toByte(), 0xFF.toByte()),
                 "PNG" to byteArrayOf(0x89.toByte(), 0x50.toByte(), 0x4E.toByte(), 0x47.toByte(), 0x0D.toByte(), 0x0A.toByte(), 0x1A.toByte(), 0x0A.toByte()),
-                "PostScript" to byteArrayOf('%'.toByte(), '!'.toByte(), 'P'.toByte(), 'S'.toByte())
+                "PostScript" to byteArrayOf('%'.code.toByte(), '!'.code.toByte(), 'P'.code.toByte(), 'S'.code.toByte())
             )
             
             for ((format, signature) in signatures) {
@@ -1089,7 +1083,7 @@ class PrinterService(private val context: Context) {
     /**
      * Saves extracted document content
      */
-    private fun saveExtractedDocument(content: ByteArray, jobId: Long, originalFormat: String) {
+    private fun saveExtractedDocument(content: ByteArray, jobId: Long) {
         try {
             // Determine the actual format based on content
             val actualFormat = detectDocumentFormat(content)
@@ -1143,8 +1137,8 @@ class PrinterService(private val context: Context) {
         Log.d(TAG, "Format detection - First 16 bytes: $firstBytes")
         
         // Check for PDF
-        if (content[0] == '%'.toByte() && content[1] == 'P'.toByte() && 
-            content[2] == 'D'.toByte() && content[3] == 'F'.toByte()) {
+        if (content[0] == '%'.code.toByte() && content[1] == 'P'.code.toByte() && 
+            content[2] == 'D'.code.toByte() && content[3] == 'F'.code.toByte()) {
             Log.d(TAG, "Detected PDF format")
             return "PDF"
         }
@@ -1170,8 +1164,8 @@ class PrinterService(private val context: Context) {
         }
         
         // Check for PostScript
-        if (content[0] == '%'.toByte() && content[1] == '!'.toByte() && 
-            content[2] == 'P'.toByte() && content[3] == 'S'.toByte()) {
+        if (content[0] == '%'.code.toByte() && content[1] == '!'.code.toByte() && 
+            content[2] == 'P'.code.toByte() && content[3] == 'S'.code.toByte()) {
             Log.d(TAG, "Detected PostScript format")
             return "PostScript"
         }
