@@ -803,29 +803,164 @@ fun LoadedPluginCard(
             }
             
             // Action buttons
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            Column(
+                verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                OutlinedButton(
-                    onClick = { onConfigure(plugin.id) },
-                    modifier = Modifier.weight(1f)
-                ) {
-                    Icon(Icons.Default.Settings, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text("Configure")
+                // Test button (specific to plugin type)
+                when (plugin.id) {
+                    "delay_simulator" -> {
+                        var testResult by remember { mutableStateOf<String?>(null) }
+                        var isRunningTest by remember { mutableStateOf(false) }
+                        
+                        Button(
+                            onClick = {
+                                coroutineScope.launch {
+                                    isRunningTest = true
+                                    testResult = null
+                                    try {
+                                        val result = printerService.testDelaySimulatorPlugin()
+                                        testResult = result
+                                    } catch (e: Exception) {
+                                        testResult = "Test failed: ${e.message}"
+                                    } finally {
+                                        isRunningTest = false
+                                    }
+                                }
+                            },
+                            enabled = !isRunningTest,
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.colorScheme.tertiary
+                            )
+                        ) {
+                            if (isRunningTest) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(16.dp),
+                                    strokeWidth = 2.dp,
+                                    color = MaterialTheme.colorScheme.onTertiary
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("Testing...")
+                            } else {
+                                Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Test Delay")
+                            }
+                        }
+                        
+                        // Show test result
+                        testResult?.let { result ->
+                            Card(
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = CardDefaults.cardColors(
+                                    containerColor = MaterialTheme.colorScheme.tertiaryContainer
+                                )
+                            ) {
+                                Text(
+                                    text = result,
+                                    modifier = Modifier.padding(8.dp),
+                                    style = MaterialTheme.typography.bodySmall
+                                )
+                            }
+                        }
+                    }
+                    
+                    "error_injection" -> {
+                        var testResult by remember { mutableStateOf<String?>(null) }
+                        var isRunningTest by remember { mutableStateOf(false) }
+                        
+                        Button(
+                            onClick = {
+                                coroutineScope.launch {
+                                    isRunningTest = true
+                                    testResult = null
+                                    try {
+                                        val result = printerService.testErrorInjectionPlugin()
+                                        testResult = result
+                                    } catch (e: Exception) {
+                                        testResult = "Test failed: ${e.message}"
+                                    } finally {
+                                        isRunningTest = false
+                                    }
+                                }
+                            },
+                            enabled = !isRunningTest,
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = MaterialTheme.colorScheme.tertiary
+                            )
+                        ) {
+                            if (isRunningTest) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(16.dp),
+                                    strokeWidth = 2.dp,
+                                    color = MaterialTheme.colorScheme.onTertiary
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("Testing...")
+                            } else {
+                                Icon(Icons.Default.Warning, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Test Errors")
+                            }
+                        }
+                        
+                        // Show test result
+                        testResult?.let { result ->
+                            Card(
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = CardDefaults.cardColors(
+                                    containerColor = MaterialTheme.colorScheme.tertiaryContainer
+                                )
+                            ) {
+                                Text(
+                                    text = result,
+                                    modifier = Modifier.padding(8.dp),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    maxLines = 10,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        }
+                    }
+                    
+                    else -> {
+                        // Generic test button for other plugins
+                        Text(
+                            text = "Plugin loaded and ready",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.fillMaxWidth(),
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                        )
+                    }
                 }
                 
-                Button(
-                    onClick = { onUnload(plugin.id) },
-                    modifier = Modifier.weight(1f),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.error
-                    )
+                // Configure and Unload buttons
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Icon(Icons.Default.Close, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text("Unload")
+                    OutlinedButton(
+                        onClick = { onConfigure(plugin.id) },
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Icon(Icons.Default.Settings, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Configure")
+                    }
+                    
+                    Button(
+                        onClick = { onUnload(plugin.id) },
+                        modifier = Modifier.weight(1f),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.error
+                        )
+                    ) {
+                        Icon(Icons.Default.Close, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("Unload")
+                    }
                 }
             }
         }

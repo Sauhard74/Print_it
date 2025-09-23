@@ -1426,6 +1426,89 @@ class PrinterService(private val context: Context) {
     }
     
     /**
+     * Test error injection plugin with multiple sample jobs
+     */
+    suspend fun testErrorInjectionPlugin(): String {
+        return try {
+            // Load the error injection plugin if not already loaded
+            val loaded = loadPlugin("error_injection")
+            if (!loaded) {
+                return "Failed to load error injection plugin"
+            }
+            
+            val results = mutableListOf<String>()
+            var successCount = 0
+            var errorCount = 0
+            val totalAttempts = 10
+            
+            repeat(totalAttempts) { attempt ->
+                try {
+                    // Create a test job
+                    val currentTime = System.currentTimeMillis()
+                    val testJob = PrintJob(
+                        id = currentTime + attempt,
+                        name = "Error Test Job #${attempt + 1}",
+                        filePath = "test_error.pdf",
+                        documentFormat = "application/pdf",
+                        size = 1024L,
+                        submissionTime = currentTime,
+                        state = PrintJobState.PENDING,
+                        metadata = mapOf("test" to true, "attempt" to attempt + 1)
+                    )
+                    
+                    // Try to process the job - error injection happens in beforeJobProcessing
+                    val continueProcessing = pluginFramework.executeBeforeJobProcessing(testJob)
+                    
+                    if (continueProcessing) {
+                        // Get metadata about the plugin
+                        val result = pluginFramework.executeJobProcessing(testJob, byteArrayOf())
+                        val lastError = result?.customMetadata?.get("last_injected_error") as? String ?: "none"
+                        
+                        successCount++
+                        results.add("✅ Job #${attempt + 1}: Success (last error: $lastError)")
+                    }
+                    
+                } catch (e: Exception) {
+                    errorCount++
+                    val errorType = when (e) {
+                        is java.net.ConnectException -> "Network"
+                        is IllegalArgumentException -> "Format"
+                        is SecurityException -> "Authorization"
+                        is IllegalStateException -> "Queue"
+                        else -> when {
+                            e.message?.contains("Memory Error") == true -> "Memory"
+                            else -> "Runtime"
+                        }
+                    }
+                    results.add("❌ Job #${attempt + 1}: $errorType Error - ${e.message}")
+                }
+            }
+            
+            val summary = "Error Injection Test Results:\n" +
+                    "Total attempts: $totalAttempts\n" +
+                    "Successful: $successCount\n" +
+                    "Errors injected: $errorCount\n" +
+                    "Error rate: ${(errorCount.toFloat() / totalAttempts * 100).toInt()}%\n\n" +
+                    "Details:\n" + results.joinToString("\n")
+            
+            logger.i(LogCategory.SYSTEM, TAG, "Error injection test completed", 
+                metadata = mapOf<String, Any>(
+                    "total_attempts" to totalAttempts,
+                    "successful_jobs" to successCount,
+                    "injected_errors" to errorCount,
+                    "error_rate_percent" to (errorCount.toFloat() / totalAttempts * 100).toInt()
+                )
+            )
+            
+            summary
+            
+        } catch (e: Exception) {
+            logger.e(LogCategory.SYSTEM, TAG, "Error testing error injection plugin", e)
+            "Error testing error injection: ${e.message}"
+        }
+    }
+    
+    /**
      * Test delay simulator plugin with a sample job
      */
     suspend fun testDelaySimulatorPlugin(): String {

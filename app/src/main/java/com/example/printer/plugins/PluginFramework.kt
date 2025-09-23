@@ -690,42 +690,174 @@ class DelaySimulatorPlugin : PrinterPlugin {
 }
 
 /**
- * Plugin that injects errors based on configuration
+ * Plugin that injects various errors for testing error handling and system resilience
  */
 class ErrorInjectionPlugin : PrinterPlugin {
     override val id = "error_injection"
     override val name = "Error Injection"
     override val version = "1.0.0"
-    override val description = "Injects various errors for testing error handling"
+    override val description = "Injects various errors for testing error handling and system resilience"
     override val author = "Built-in"
     
     private var errorProbability: Float = 0.1f
     private var errorTypes: List<String> = listOf("network", "memory", "format")
+    private var errorMode: String = "random" // random, sequential, specific
+    private var specificErrorType: String = "network"
+    private var currentErrorIndex = 0
+    private var lastInjectedError: String? = null
+    
+    // Predefined error scenarios
+    private val errorScenarios = mapOf(
+        "network" to listOf(
+            "Connection timeout - simulated network failure",
+            "Socket connection refused - printer unreachable", 
+            "Network congestion - packet loss detected",
+            "DNS resolution failed - printer hostname unknown"
+        ),
+        "memory" to listOf(
+            "Out of memory - insufficient heap space for job processing",
+            "Memory allocation failed - large document processing error",
+            "Buffer overflow - document size exceeds memory limits"
+        ),
+        "format" to listOf(
+            "Unsupported document format - invalid file structure",
+            "Corrupted document data - parsing failed",
+            "Invalid IPP attributes - malformed request data",
+            "Document compression error - decompression failed"
+        ),
+        "hardware" to listOf(
+            "Printer jam detected - paper feed mechanism blocked",
+            "Low ink/toner levels - insufficient supplies",
+            "Hardware malfunction - print head alignment error",
+            "Temperature sensor error - printer overheating"
+        ),
+        "authorization" to listOf(
+            "Authentication failed - invalid credentials",
+            "Access denied - insufficient permissions",
+            "Session expired - re-authentication required",
+            "Account locked - too many failed attempts"
+        ),
+        "queue" to listOf(
+            "Print queue full - maximum jobs exceeded",
+            "Job priority conflict - queue management error",
+            "Duplicate job ID - processing conflict detected"
+        )
+    )
     
     override suspend fun onLoad(context: Context): Boolean = true
     
     override suspend fun onUnload(): Boolean = true
     
     override suspend fun beforeJobProcessing(job: PrintJob): Boolean {
-        if (Math.random() < errorProbability) {
-            val errorType = errorTypes.random()
-            throw RuntimeException("Injected error: $errorType")
+        if (shouldInjectError()) {
+            val errorDetails = getNextError()
+            lastInjectedError = errorDetails.first
+            
+            // Log the error injection for debugging
+            android.util.Log.w("ErrorInjectionPlugin", 
+                "Injecting ${errorDetails.first} error: ${errorDetails.second}")
+            
+            throw createErrorException(errorDetails.first, errorDetails.second)
         }
         return true
+    }
+    
+    override suspend fun processJob(job: PrintJob, documentBytes: ByteArray): JobProcessingResult? {
+        // Return metadata about error injection for testing
+        return JobProcessingResult(
+            processedBytes = null,
+            modifiedJob = null,
+            customMetadata = mapOf(
+                "error_probability" to errorProbability,
+                "error_mode" to errorMode,
+                "available_error_types" to errorTypes.joinToString(","),
+                "last_injected_error" to (lastInjectedError ?: "none")
+            )
+        )
+    }
+    
+    private fun shouldInjectError(): Boolean {
+        return Math.random() < errorProbability
+    }
+    
+    private fun getNextError(): Pair<String, String> {
+        val errorType = when (errorMode) {
+            "sequential" -> {
+                val type = errorTypes[currentErrorIndex % errorTypes.size]
+                currentErrorIndex++
+                type
+            }
+            "specific" -> specificErrorType
+            else -> errorTypes.random() // "random" mode
+        }
+        
+        val scenarios = errorScenarios[errorType] ?: listOf("Generic $errorType error")
+        val errorMessage = scenarios.random()
+        
+        return Pair(errorType, errorMessage)
+    }
+    
+    private fun createErrorException(errorType: String, message: String): Exception {
+        return when (errorType) {
+            "network" -> java.net.ConnectException("Network Error: $message")
+            "memory" -> RuntimeException("Memory Error: $message") // OutOfMemoryError is not Exception subclass
+            "format" -> IllegalArgumentException("Format Error: $message") 
+            "hardware" -> RuntimeException("Hardware Error: $message")
+            "authorization" -> SecurityException("Authorization Error: $message")
+            "queue" -> IllegalStateException("Queue Error: $message")
+            else -> RuntimeException("$errorType Error: $message")
+        }
     }
     
     override fun getConfigurationSchema(): PluginConfigurationSchema {
         return PluginConfigurationSchema(
             fields = listOf(
-                ConfigurationField("error_probability", "Error probability", FieldType.NUMBER, 0.1, min = 0.0, max = 1.0),
-                ConfigurationField("error_types", "Error types", FieldType.TEXT, "network,memory,format")
+                ConfigurationField(
+                    key = "error_probability",
+                    label = "Error Probability",
+                    type = FieldType.NUMBER,
+                    defaultValue = 0.1,
+                    min = 0.0,
+                    max = 1.0,
+                    description = "Probability of error injection (0.0 to 1.0)"
+                ),
+                ConfigurationField(
+                    key = "error_mode",
+                    label = "Error Mode",
+                    type = FieldType.SELECT,
+                    defaultValue = "random",
+                    options = listOf("random", "sequential", "specific"),
+                    description = "How errors are selected: random, sequential rotation, or specific type"
+                ),
+                ConfigurationField(
+                    key = "error_types",
+                    label = "Error Types",
+                    type = FieldType.TEXT,
+                    defaultValue = "network,memory,format",
+                    description = "Comma-separated list: network, memory, format, hardware, authorization, queue"
+                ),
+                ConfigurationField(
+                    key = "specific_error_type",
+                    label = "Specific Error Type",
+                    type = FieldType.SELECT,
+                    defaultValue = "network",
+                    options = listOf("network", "memory", "format", "hardware", "authorization", "queue"),
+                    description = "Error type to use when mode is 'specific'"
+                )
             )
         )
     }
     
     override suspend fun updateConfiguration(config: Map<String, Any>): Boolean {
         errorProbability = (config["error_probability"] as? Number)?.toFloat() ?: 0.1f
-        errorTypes = (config["error_types"] as? String)?.split(",")?.map { it.trim() } ?: listOf("network")
+        errorMode = config["error_mode"] as? String ?: "random"
+        specificErrorType = config["specific_error_type"] as? String ?: "network"
+        errorTypes = (config["error_types"] as? String)?.split(",")?.map { it.trim() } 
+            ?: listOf("network", "memory", "format")
+        
+        // Reset sequential counter when configuration changes
+        currentErrorIndex = 0
+        
         return true
     }
 }
