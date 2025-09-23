@@ -223,6 +223,33 @@ object IppAttributesUtils {
         }
     }
     
+    // Multi-value string attribute implementation
+    private class MultiStringAttribute(override val name: String, private val values: List<String>) : Attribute<String> {
+        override val size: Int = values.size
+        override val type = object : AttributeType<String> {
+            override val name: String get() = this@MultiStringAttribute.name
+            override fun coerce(value: Any): String? = value as? String
+        }
+        override fun isEmpty(): Boolean = values.isEmpty()
+
+        override fun get(index: Int): String {
+            if (index < 0 || index >= values.size) throw IndexOutOfBoundsException()
+            return values[index]
+        }
+        override fun getValue(): String? = values.firstOrNull()
+        override fun indexOf(element: String): Int = values.indexOf(element)
+        override fun lastIndexOf(element: String): Int = values.lastIndexOf(element)
+
+        override fun contains(element: String): Boolean = values.contains(element)
+        override fun containsAll(elements: Collection<String>): Boolean = values.containsAll(elements)
+        override fun toString(): String = values.joinToString(",")
+
+        override fun iterator(): Iterator<String> = values.iterator()
+        override fun listIterator(): kotlin.collections.ListIterator<String> = values.listIterator()
+        override fun listIterator(index: Int): kotlin.collections.ListIterator<String> = values.listIterator(index)
+        override fun subList(fromIndex: Int, toIndex: Int): List<String> = values.subList(fromIndex, toIndex)
+    }
+    
     private class IntAttribute(override val name: String, private val value: Int) : Attribute<Int> {
         override val size: Int = 1
         override val type = object : AttributeType<Int> {
@@ -415,46 +442,203 @@ object IppAttributesUtils {
             }
             
             val jsonString = FileInputStream(file).bufferedReader().use { it.readText() }
-            val jsonArray = JSONArray(jsonString)
             val attributeGroups = mutableListOf<AttributeGroup>()
-            
-            for (i in 0 until jsonArray.length()) {
-                val groupObj = jsonArray.getJSONObject(i)
-                val tagName = groupObj.getString("tag")
-                val tag = try {
-                    // Use a simple enum approach instead of Tag.values()
-                    getTagByName(tagName) ?: Tag.printerAttributes
-                } catch (e: Exception) {
-                    Log.e(TAG, "Invalid tag name: $tagName", e)
-                    Tag.printerAttributes // Default to printer attributes
+
+            // Detect format: legacy array vs printer JSON object
+            val trimmed = jsonString.trim()
+            if (trimmed.startsWith("[")) {
+                // Legacy array format
+                val jsonArray = JSONArray(trimmed)
+                parseLegacyAttributeArray(jsonArray, attributeGroups)
+            } else {
+                // New printer JSON format (e.g., { "response": { ... } })
+                val root = try { JSONObject(trimmed) } catch (e: Exception) {
+                    Log.e(TAG, "Invalid JSON object in IPP attributes file", e)
+                    null
                 }
-                
-                val loadedAttributes = mutableListOf<Attribute<*>>()
-                
-                val attrsJsonArray = groupObj.getJSONArray("attributes")
-                for (j in 0 until attrsJsonArray.length()) {
-                    val attrObj = attrsJsonArray.getJSONObject(j)
-                    val name = attrObj.getString("name")
-                    val valueString = attrObj.getString("value")
-                    val typeString = if (attrObj.has("type")) attrObj.getString("type") else "STRING"
-                    
-                    val attribute = createAttribute(name, valueString, typeString)
-                    if (attribute != null) {
-                        loadedAttributes.add(attribute)
-                    }
-                }
-                
-                if (loadedAttributes.isNotEmpty()) {
-                    // Create AttributeGroup using our custom implementation
-                    attributeGroups.add(createAttributeGroup(tag, loadedAttributes))
+                if (root != null) {
+                    parsePrinterResponseJson(root, attributeGroups)
                 }
             }
-            
+
             Log.d(TAG, "Loaded ${attributeGroups.size} IPP attribute groups from: ${file.absolutePath}")
-            return attributeGroups
+            return if (attributeGroups.isNotEmpty()) attributeGroups else null
         } catch (e: Exception) {
             Log.e(TAG, "Error loading IPP attributes", e)
             return null
+        }
+    }
+
+    /**
+     * Parses the legacy array-based schema into AttributeGroups
+     */
+    private fun parseLegacyAttributeArray(jsonArray: JSONArray, out: MutableList<AttributeGroup>) {
+        for (i in 0 until jsonArray.length()) {
+            val groupObj = jsonArray.getJSONObject(i)
+            val tagName = groupObj.optString("tag", "PRINTER_ATTRIBUTES")
+            val tag = getTagByName(tagName) ?: Tag.printerAttributes
+
+            val loadedAttributes = mutableListOf<Attribute<*>>()
+            val attrsJsonArray = groupObj.optJSONArray("attributes") ?: JSONArray()
+            for (j in 0 until attrsJsonArray.length()) {
+                val attrObj = attrsJsonArray.getJSONObject(j)
+                val name = attrObj.optString("name")
+                if (name.isBlank()) continue
+
+                // Prefer multi-value if present
+                if (attrObj.has("values")) {
+                    val valuesArray = attrObj.getJSONArray("values")
+                    val values = (0 until valuesArray.length()).map { idx -> valuesArray.get(idx).toString() }
+                    loadedAttributes.add(MultiStringAttribute(name, values))
+                } else {
+                    val valueString = attrObj.optString("value")
+                    val typeString = attrObj.optString("type", "STRING")
+                    createAttribute(name, valueString, typeString)?.let { loadedAttributes.add(it) }
+                }
+            }
+
+            if (loadedAttributes.isNotEmpty()) {
+                out.add(createAttributeGroup(tag, loadedAttributes))
+            }
+        }
+    }
+
+    /**
+     * Parses printer-style response JSON (like the sample provided) and fills AttributeGroups
+     */
+    private fun parsePrinterResponseJson(root: JSONObject, out: MutableList<AttributeGroup>) {
+        try {
+            val response = root.optJSONObject("response") ?: root
+
+            // operation-attributes -> OPERATION_ATTRIBUTES group
+            response.optJSONObject("operation-attributes")?.let { opAttrs ->
+                val attrs = parseNameToObjectMap(opAttrs)
+                if (attrs.isNotEmpty()) {
+                    out.add(createAttributeGroup(Tag.operationAttributes, attrs))
+                }
+            }
+
+            // printer-attributes -> PRINTER_ATTRIBUTES group
+            response.optJSONObject("printer-attributes")?.let { prAttrs ->
+                val attrs = parseNameToObjectMap(prAttrs)
+                if (attrs.isNotEmpty()) {
+                    out.add(createAttributeGroup(Tag.printerAttributes, attrs))
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error parsing printer response JSON", e)
+        }
+    }
+
+    /**
+     * Converts a map of attributeName -> { type, value } objects to a list of Attributes
+     */
+    private fun parseNameToObjectMap(container: JSONObject): List<Attribute<*>> {
+        val result = mutableListOf<Attribute<*>>()
+        val names = container.keys()
+        var skippedCount = 0
+        
+        while (names.hasNext()) {
+            val name = names.next()
+            
+            // Skip attributes with invalid names
+            if (name.isBlank()) {
+                skippedCount++
+                continue
+            }
+            
+            try {
+                val obj = container.get(name)
+                var attribute: Attribute<*>? = null
+                
+                when (obj) {
+                    is JSONObject -> {
+                        val type = obj.optString("type", "string").lowercase()
+                        
+                        // Handle multi-valued attributes
+                        if (obj.has("value") && obj.get("value") is JSONArray) {
+                            val arr = obj.getJSONArray("value")
+                            if (arr.length() > 0) {
+                                val values = (0 until arr.length()).map { idx -> 
+                                    val value = arr.get(idx)
+                                    // Handle null values
+                                    if (value == JSONObject.NULL) "" else value.toString()
+                                }
+                                attribute = MultiStringAttribute(name, values)
+                            }
+                        } 
+                        // Handle single-valued attributes
+                        else if (obj.has("value")) {
+                            val valueAny = obj.get("value")
+                            if (valueAny != JSONObject.NULL) {
+                                attribute = makeAttributeFromTypedValue(name, type, valueAny)
+                            }
+                        }
+                        // Handle object without explicit value (treat as JSON string)
+                        else {
+                            attribute = StringAttribute(name, obj.toString())
+                        }
+                    }
+                    is JSONArray -> {
+                        if (obj.length() > 0) {
+                            val values = (0 until obj.length()).map { idx -> 
+                                val value = obj.get(idx)
+                                if (value == JSONObject.NULL) "" else value.toString()
+                            }
+                            attribute = MultiStringAttribute(name, values)
+                        }
+                    }
+                    is String, is Number, is Boolean -> {
+                        // Handle primitive values directly
+                        attribute = StringAttribute(name, obj.toString())
+                    }
+                    else -> {
+                        // Handle other types (including null)
+                        if (obj != JSONObject.NULL) {
+                            attribute = StringAttribute(name, obj.toString())
+                        }
+                    }
+                }
+                
+                if (attribute != null) {
+                    result.add(attribute)
+                } else {
+                    Log.d(TAG, "Skipped attribute '$name' with null/empty value")
+                    skippedCount++
+                }
+                
+            } catch (e: Exception) {
+                Log.w(TAG, "Skipping attribute '$name' due to parse error: ${e.message}", e)
+                skippedCount++
+            }
+        }
+        
+        Log.d(TAG, "Parsed ${result.size} attributes, skipped $skippedCount from container")
+        return result
+    }
+
+    /**
+     * Creates an Attribute based on the provided type string and raw value
+     */
+    private fun makeAttributeFromTypedValue(name: String, type: String, valueAny: Any): Attribute<*>? {
+        return try {
+            when (type) {
+                "integer", "enum" -> when (valueAny) {
+                    is Number -> IntAttribute(name, valueAny.toInt())
+                    is String -> valueAny.toIntOrNull()?.let { IntAttribute(name, it) } ?: StringAttribute(name, valueAny)
+                    else -> StringAttribute(name, valueAny.toString())
+                }
+                "boolean" -> when (valueAny) {
+                    is Boolean -> BooleanAttribute(name, valueAny)
+                    is String -> BooleanAttribute(name, valueAny.equals("true", true))
+                    else -> BooleanAttribute(name, false)
+                }
+                // Treat all others as strings while preserving content
+                else -> StringAttribute(name, valueAny.toString())
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Falling back to string attribute for $name", e)
+            StringAttribute(name, valueAny.toString())
         }
     }
     
@@ -487,26 +671,67 @@ object IppAttributesUtils {
     }
     
     /**
-     * Validates IPP attributes
+     * Validates IPP attributes with different levels of strictness
      */
-    fun validateIppAttributes(attributes: List<AttributeGroup>): Boolean {
-        val requiredGroups = setOf(Tag.printerAttributes)
-        val requiredAttributes = setOf(
-            "printer-name",
-            "printer-state",
-            "printer-state-reasons",
-            "printer-is-accepting-jobs",
-            "printer-uri",
-            "document-format-supported"
-        )
-        
-        val hasRequiredGroups = attributes.any { it.tag in requiredGroups }
-        val hasRequiredAttributes = attributes.any { group ->
-            val attributesInGroup = getAttributesFromGroup(group)
-            attributesInGroup.any { attr -> attr.name in requiredAttributes }
+    fun validateIppAttributes(attributes: List<AttributeGroup>?, strict: Boolean = false): Boolean {
+        if (attributes == null || attributes.isEmpty()) {
+            Log.w(TAG, "Validation failed: No attributes provided")
+            return false
         }
         
-        return hasRequiredGroups && hasRequiredAttributes
+        // Basic validation - just check that we have valid groups with valid attributes
+        var hasValidGroups = false
+        var totalAttributes = 0
+        
+        for (group in attributes) {
+            try {
+                val attributesInGroup = getAttributesFromGroup(group)
+                if (attributesInGroup.isNotEmpty()) {
+                    hasValidGroups = true
+                    totalAttributes += attributesInGroup.size
+                    
+                    // Check that all attributes have valid names
+                    for (attr in attributesInGroup) {
+                        if (attr.name.isBlank()) {
+                            Log.w(TAG, "Validation failed: Found attribute with blank name")
+                            return false
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Validation failed: Error processing attribute group", e)
+                return false
+            }
+        }
+        
+        if (!hasValidGroups) {
+            Log.w(TAG, "Validation failed: No valid attribute groups found")
+            return false
+        }
+        
+        // Strict validation for printer-specific requirements
+        if (strict) {
+            val requiredGroups = setOf(Tag.printerAttributes)
+            val requiredAttributes = setOf(
+                "printer-name",
+                "printer-state", 
+                "printer-is-accepting-jobs"
+            )
+            
+            val hasRequiredGroups = attributes.any { it.tag in requiredGroups }
+            val hasRequiredAttributes = attributes.any { group ->
+                val attributesInGroup = getAttributesFromGroup(group)
+                attributesInGroup.any { attr -> attr.name in requiredAttributes }
+            }
+            
+            if (!hasRequiredGroups || !hasRequiredAttributes) {
+                Log.w(TAG, "Strict validation failed: Missing required printer attributes")
+                return false
+            }
+        }
+        
+        Log.d(TAG, "Validation passed: ${attributes.size} groups, $totalAttributes total attributes")
+        return true
     }
     
     /**

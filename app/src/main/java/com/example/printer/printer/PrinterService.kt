@@ -35,6 +35,9 @@ import com.example.printer.logging.PrinterLogger
 import com.example.printer.logging.LogCategory
 import com.example.printer.logging.LogLevel
 import java.io.FileOutputStream
+import com.example.printer.plugins.PluginFramework
+import com.example.printer.queue.PrintJob
+import com.example.printer.queue.PrintJobState
 
 class PrinterService(private val context: Context) {
     private val TAG = "PrinterService"
@@ -47,6 +50,7 @@ class PrinterService(private val context: Context) {
     private var server: ApplicationEngine? = null
     private var customIppAttributes: List<AttributeGroup>? = null
     private val logger by lazy { PrinterLogger.getInstance(context) }
+    private val pluginFramework by lazy { PluginFramework.getInstance(context) }
     
     // Add error simulation properties
     private var simulateErrorMode = false
@@ -131,6 +135,27 @@ class PrinterService(private val context: Context) {
     fun setCustomIppAttributes(attributes: List<AttributeGroup>?) {
         customIppAttributes = attributes
         Log.d(TAG, "Set custom IPP attributes: ${attributes?.size ?: 0} groups")
+        
+        if (attributes != null) {
+            logger.d(LogCategory.IPP_PROTOCOL, TAG, "Custom IPP attributes loaded", metadata = mapOf(
+                "groups" to attributes.size,
+                "attributes_detail" to attributes.mapIndexed { index, group ->
+                    try {
+                        var count = 0
+                        val iterator = group.iterator()
+                        while (iterator.hasNext()) {
+                            iterator.next()
+                            count++
+                        }
+                        "Group $index (${group.tag}): $count attributes"
+                    } catch (e: Exception) {
+                        "Group $index (${group.tag}): error counting"
+                    }
+                }
+            ))
+        } else {
+            logger.d(LogCategory.IPP_PROTOCOL, TAG, "Custom IPP attributes cleared")
+        }
     }
     
     fun getCustomIppAttributes(): List<AttributeGroup>? {
@@ -412,7 +437,12 @@ class PrinterService(private val context: Context) {
                         logger.w(LogCategory.IPP_PROTOCOL, TAG, "Rejected document format $documentFormat; supported=$supportedFormats")
                         // If custom attributes are set, enforce the constraint; otherwise, continue
                         if (customIppAttributes != null) {
+                            Log.w(TAG, "Custom attributes enforcing document format restriction - rejecting $documentFormat")
+                            logger.w(LogCategory.DOCUMENT_PROCESSING, TAG, "Custom attributes rejected unsupported format", 
+                                metadata = mapOf("format" to documentFormat, "supported" to supportedFormats))
                             return IppPacket(Status.clientErrorDocumentFormatNotSupported, request.requestId)
+                        } else {
+                            Log.d(TAG, "No custom attributes set - accepting unsupported format $documentFormat")
                         }
                     }
                     
@@ -422,9 +452,38 @@ class PrinterService(private val context: Context) {
                         
                         // Generate a unique job ID
                         val jobId = System.currentTimeMillis()
+                        Log.d(TAG, "Processing Print-Job with ID: $jobId, document size: ${documentData.size} bytes, format: $documentFormat")
+                        
+                        // Register job in queue for plugin hooks
+                        val job = com.example.printer.queue.PrintJob(
+                            id = jobId,
+                            name = request.attributeGroups.find { it.tag == Tag.operationAttributes }?.getValues(Types.jobName)?.firstOrNull()?.toString() ?: "Print Job",
+                            filePath = File(printJobsDirectory, "print_job_${jobId}.tmp").absolutePath,
+                            documentFormat = documentFormat,
+                            size = documentData.size.toLong(),
+                            submissionTime = System.currentTimeMillis(),
+                            state = com.example.printer.queue.PrintJobState.PENDING,
+                            stateReasons = listOf("none"),
+                            jobOriginatingUserName = request.attributeGroups.find { it.tag == Tag.operationAttributes }?.getValues(Types.requestingUserName)?.firstOrNull()?.toString() ?: "anonymous",
+                            impressionsCompleted = 0,
+                            metadata = emptyMap()
+                        )
+                        // Execute plugin before hooks
+                        try {
+                            kotlinx.coroutines.runBlocking { pluginFramework.executeBeforeJobProcessing(job) }
+                        } catch (e: Exception) {
+                            Log.w(TAG, "Plugin beforeJobProcessing raised: ${e.message}")
+                        }
                         
                         // Save the document with format info
                         saveDocument(documentData, jobId, documentFormat)
+                        
+                        // Execute plugin processing hook (allows delay/modification)
+                        try {
+                            kotlinx.coroutines.runBlocking { pluginFramework.executeJobProcessing(job, documentData) }
+                        } catch (e: Exception) {
+                            Log.w(TAG, "Plugin processJob raised: ${e.message}")
+                        }
                         
                         // Create a success response with job attributes
                         val response = IppPacket(
@@ -505,8 +564,28 @@ class PrinterService(private val context: Context) {
                         
                         // Use the job ID from the request or generate a new one
                         val actualJobId = if (jobId != null && jobId > 0) jobId.toLong() else System.currentTimeMillis()
+                        val job = com.example.printer.queue.PrintJob(
+                            id = actualJobId,
+                            name = request.attributeGroups.find { it.tag == Tag.operationAttributes }?.getValues(Types.jobName)?.firstOrNull()?.toString() ?: "Send Document",
+                            filePath = File(printJobsDirectory, "print_job_${actualJobId}.tmp").absolutePath,
+                            documentFormat = documentFormat,
+                            size = documentData.size.toLong(),
+                            submissionTime = System.currentTimeMillis(),
+                            state = com.example.printer.queue.PrintJobState.PENDING,
+                            stateReasons = listOf("none"),
+                            jobOriginatingUserName = request.attributeGroups.find { it.tag == Tag.operationAttributes }?.getValues(Types.requestingUserName)?.firstOrNull()?.toString() ?: "anonymous",
+                            impressionsCompleted = 0,
+                            metadata = emptyMap()
+                        )
+                        try {
+                            kotlinx.coroutines.runBlocking { pluginFramework.executeBeforeJobProcessing(job) }
+                        } catch (e: Exception) { Log.w(TAG, "Plugin before hook error: ${e.message}") }
                         
                         saveDocument(documentData, actualJobId, documentFormat)
+                        
+                        try {
+                            kotlinx.coroutines.runBlocking { pluginFramework.executeJobProcessing(job, documentData) }
+                        } catch (e: Exception) { Log.w(TAG, "Plugin process hook error: ${e.message}") }
                         
                         // Create a success response with job attributes
                         val response = IppPacket(
@@ -572,7 +651,17 @@ class PrinterService(private val context: Context) {
             }
             Operation.getPrinterAttributes.code -> { // Get-Printer-Attributes operation
                 // This provides information about printer capabilities
-                createPrinterAttributesResponse(request)
+                val baseResponse = createPrinterAttributesResponse(request)
+                // Allow plugins to customize attributes
+                try {
+                    val customized = kotlinx.coroutines.runBlocking { pluginFramework.executeIppAttributeCustomization(baseResponse.attributeGroups.toList()) }
+                    return IppPacket(
+                        baseResponse.status,
+                        baseResponse.requestId,
+                        *customized.toTypedArray()
+                    )
+                } catch (_: Exception) {}
+                baseResponse
             }
             else -> {
                 // For any unhandled operations, return a positive response
@@ -585,6 +674,39 @@ class PrinterService(private val context: Context) {
         // If custom attributes are set, use them
         if (customIppAttributes != null) {
             Log.d(TAG, "Using custom IPP attributes for printer response")
+            logger.d(LogCategory.IPP_PROTOCOL, TAG, "Using custom IPP attributes", metadata = mapOf(
+                "groups" to customIppAttributes!!.size,
+                "total_attributes" to customIppAttributes!!.sumOf { group ->
+                    try {
+                        // Count attributes in each group safely
+                        var count = 0
+                        val iterator = group.iterator()
+                        while (iterator.hasNext()) {
+                            iterator.next()
+                            count++
+                        }
+                        count
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Error counting attributes in group", e)
+                        0
+                    }
+                }
+            ))
+            
+            // Log specific attributes being applied
+            customIppAttributes!!.forEach { group ->
+                try {
+                    Log.d(TAG, "Custom attribute group: ${group.tag}")
+                    val iterator = group.iterator()
+                    while (iterator.hasNext()) {
+                        val attr = iterator.next()
+                        Log.d(TAG, "  - ${attr.name}: ${attr.getValue()}")
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "Error logging attribute group", e)
+                }
+            }
+            
             return IppPacket(
                 Status.successfulOk,
                 request.requestId,
@@ -744,6 +866,7 @@ class PrinterService(private val context: Context) {
                 Log.d(TAG, "PDF document extracted and saved to: ${file.absolutePath}")
                 
                 if (file.exists() && file.length() > 0) {
+                    Log.d(TAG, "Successfully saved PDF document: ${file.absolutePath} (${file.length()} bytes)")
                     // Notify that a new job was received
                     val intent = android.content.Intent("com.example.printer.NEW_PRINT_JOB")
                     intent.putExtra("job_path", file.absolutePath)
@@ -753,6 +876,8 @@ class PrinterService(private val context: Context) {
                     intent.putExtra("detected_format", "pdf")
                     Log.d(TAG, "Broadcasting print job notification: ${intent.action}")
                     context.sendBroadcast(intent)
+                } else {
+                    Log.e(TAG, "Failed to save PDF document or file is empty")
                 }
                 return
             }

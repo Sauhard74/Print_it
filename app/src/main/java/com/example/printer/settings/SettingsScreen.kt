@@ -1,5 +1,6 @@
 package com.example.printer.settings
 
+import android.content.Context
 import android.net.Uri
 import android.util.Log
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -49,8 +50,23 @@ fun SettingsScreen(
     var showImportDialog by remember { mutableStateOf(false) }
     var showExportDialog by remember { mutableStateOf(false) }
     var showDiscoveryDialog by remember { mutableStateOf(false) }
-    var selectedAttributesFile by remember { mutableStateOf<String?>(null) }
+    // Load saved selection from SharedPreferences
+    val sharedPrefs = context.getSharedPreferences("printer_settings", Context.MODE_PRIVATE)
+    var selectedAttributesFile by remember { 
+        mutableStateOf<String?>(sharedPrefs.getString("selected_attributes_file", null))
+    }
     var availableAttributeFiles by remember { mutableStateOf(IppAttributesUtils.getAvailableIppAttributeFiles(context)) }
+    
+    // Load saved custom attributes on startup
+    LaunchedEffect(selectedAttributesFile) {
+        selectedAttributesFile?.let { filename ->
+            Log.d("SettingsScreen", "Loading saved custom attributes: $filename")
+            IppAttributesUtils.loadIppAttributes(context, filename)?.let { attributes ->
+                printerService.setCustomIppAttributes(attributes)
+                Log.d("SettingsScreen", "Restored custom attributes: ${attributes.size} groups")
+            }
+        }
+    }
     
     // Printer discovery states
     var isDiscovering by remember { mutableStateOf(false) }
@@ -218,8 +234,13 @@ fun SettingsScreen(
                                             selected = filename == selectedAttributesFile,
                                             onClick = {
                                                 selectedAttributesFile = filename
+                                                // Save selection to SharedPreferences
+                                                sharedPrefs.edit().putString("selected_attributes_file", filename).apply()
+                                                Log.d("SettingsScreen", "Selected custom attributes file: $filename")
+                                                
                                                 IppAttributesUtils.loadIppAttributes(context, filename)?.let { attributes ->
                                                     printerService.setCustomIppAttributes(attributes)
+                                                    Log.d("SettingsScreen", "Applied custom attributes: ${attributes.size} groups")
                                                 }
                                             }
                                         )
@@ -233,7 +254,10 @@ fun SettingsScreen(
                                             availableAttributeFiles = IppAttributesUtils.getAvailableIppAttributeFiles(context)
                                             if (selectedAttributesFile == filename) {
                                                 selectedAttributesFile = null
+                                                // Clear selection from SharedPreferences
+                                                sharedPrefs.edit().remove("selected_attributes_file").apply()
                                                 printerService.setCustomIppAttributes(null)
+                                                Log.d("SettingsScreen", "Cleared custom attributes selection")
                                             }
                                         }
                                     ) {
@@ -249,6 +273,90 @@ fun SettingsScreen(
                                 "No custom IPP attributes configured",
                                 style = MaterialTheme.typography.bodyMedium
                             )
+                        }
+                        
+                        // Add verification section
+                        if (selectedAttributesFile != null) {
+                            Spacer(modifier = Modifier.height(16.dp))
+                            
+                            Card(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 4.dp),
+                                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+                            ) {
+                                Column(
+                                    modifier = Modifier.padding(16.dp)
+                                ) {
+                                    Text(
+                                        text = "Custom Attributes Verification",
+                                        style = MaterialTheme.typography.titleMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    
+                                    Text(
+                                        text = "Active file: $selectedAttributesFile",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    
+                                    Spacer(modifier = Modifier.height(12.dp))
+                                    
+                                    Button(
+                                        onClick = {
+                                            // Test custom attributes by simulating a Get-Printer-Attributes request
+                                            val currentAttributes = printerService.getCustomIppAttributes()
+                                            if (currentAttributes != null) {
+                                                Log.d("SettingsScreen", "=== CUSTOM ATTRIBUTES VERIFICATION ===")
+                                                Log.d("SettingsScreen", "Active custom attributes: ${currentAttributes.size} groups")
+                                                
+                                                currentAttributes.forEachIndexed { index, group ->
+                                                    Log.d("SettingsScreen", "Group $index: ${group.tag}")
+                                                    try {
+                                                        val iterator = group.iterator()
+                                                        var attrCount = 0
+                                                        while (iterator.hasNext()) {
+                                                            val attr = iterator.next()
+                                                            Log.d("SettingsScreen", "  ${attr.name} = ${attr.getValue()}")
+                                                            attrCount++
+                                                        }
+                                                        Log.d("SettingsScreen", "  Total attributes in group: $attrCount")
+                                                    } catch (e: Exception) {
+                                                        Log.e("SettingsScreen", "Error reading group $index", e)
+                                                    }
+                                                }
+                                                Log.d("SettingsScreen", "=== END VERIFICATION ===")
+                                                
+                                                android.widget.Toast.makeText(
+                                                    context,
+                                                    "Custom attributes are active! Check logs for details.",
+                                                    android.widget.Toast.LENGTH_LONG
+                                                ).show()
+                                            } else {
+                                                Log.w("SettingsScreen", "No custom attributes currently loaded")
+                                                android.widget.Toast.makeText(
+                                                    context,
+                                                    "No custom attributes currently active!",
+                                                    android.widget.Toast.LENGTH_SHORT
+                                                ).show()
+                                            }
+                                        },
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Text("Verify Custom Attributes")
+                                    }
+                                    
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    
+                                    Text(
+                                        text = "This will log all active custom attributes to help verify they are being used in IPP responses.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                                    )
+                                }
+                            }
                         }
                         
                         Spacer(modifier = Modifier.height(16.dp))
@@ -851,66 +959,93 @@ private fun handleImportAttributes(
     try {
         context.contentResolver.openInputStream(uri)?.use { inputStream ->
             val jsonString = inputStream.bufferedReader().use { it.readText() }
-            val jsonArray = org.json.JSONArray(jsonString)
-            val attributes = mutableListOf<AttributeGroup>()
             
-            for (i in 0 until jsonArray.length()) {
-                val groupObj = jsonArray.getJSONObject(i)
-                val tagName = groupObj.getString("tag")
-                val tag = try {
-                    IppAttributesUtils.getTagByName(tagName) ?: Tag.printerAttributes
-                } catch (e: Exception) {
-                    Log.e("SettingsScreen", "Invalid tag: $tagName", e)
-                    Tag.printerAttributes // Default to printer attributes
-                }
-                
-                val attrsArray = groupObj.getJSONArray("attributes")
-                val attrsList = mutableListOf<com.hp.jipp.encoding.Attribute<*>>()
-                
-                for (j in 0 until attrsArray.length()) {
-                    try {
-                        val attrObj = attrsArray.getJSONObject(j)
-                        val name = attrObj.getString("name")
-                        val value = attrObj.getString("value")
-                        val type = attrObj.getString("type")
-                        
-                        // Load through IppAttributesUtils instead of direct creation
-                        val attr = IppAttributesUtils.createAttribute(name, value, type)
-                        if (attr != null) {
-                            attrsList.add(attr)
-                        }
-                    } catch (e: Exception) {
-                        Log.e("SettingsScreen", "Error processing attribute", e)
-                    }
-                }
-                
-                if (attrsList.isNotEmpty()) {
-                    attributes.add(IppAttributesUtils.createAttributeGroup(tag, attrsList))
+            // Create a temporary file and use IppAttributesUtils to handle both array and object formats
+            val tempFilename = "temp_import_${System.currentTimeMillis()}.json"
+            val attributesDir = File(context.filesDir, "ipp_attributes")
+            if (!attributesDir.exists()) {
+                attributesDir.mkdirs()
+            }
+            
+            val tempFile = File(attributesDir, tempFilename)
+            var attributes: List<AttributeGroup>? = null
+            
+            try {
+                // Write temp file and use loadIppAttributes which handles multiple formats
+                tempFile.writeText(jsonString)
+                attributes = IppAttributesUtils.loadIppAttributes(context, tempFilename)
+                Log.d("SettingsScreen", "Loaded ${attributes?.size ?: 0} attribute groups from imported file")
+            } finally {
+                // Clean up temp file
+                if (tempFile.exists()) {
+                    tempFile.delete()
                 }
             }
             
-            if (IppAttributesUtils.validateIppAttributes(attributes)) {
-                val filename = "ipp_attributes_${System.currentTimeMillis()}.json"
-                if (IppAttributesUtils.saveIppAttributes(context, attributes, filename)) {
-                    printerService.setCustomIppAttributes(attributes)
-                    onSaved(filename)
-                    android.widget.Toast.makeText(
-                        context,
-                        "IPP attributes imported successfully",
-                        android.widget.Toast.LENGTH_SHORT
-                    ).show()
+            if (attributes != null && attributes.isNotEmpty()) {
+                // Perform detailed validation
+                val isValid = IppAttributesUtils.validateIppAttributes(attributes)
+                Log.d("SettingsScreen", "Attribute validation result: $isValid")
+                
+                if (isValid) {
+                    val filename = "ipp_attributes_${System.currentTimeMillis()}.json"
+                    Log.d("SettingsScreen", "Attempting to save attributes to: $filename")
+                    
+                    if (IppAttributesUtils.saveIppAttributes(context, attributes, filename)) {
+                        // Test if attributes can be loaded back successfully
+                        val reloadedAttributes = IppAttributesUtils.loadIppAttributes(context, filename)
+                        if (reloadedAttributes != null && reloadedAttributes.size == attributes.size) {
+                            printerService.setCustomIppAttributes(attributes)
+                            onSaved(filename)
+                            Log.d("SettingsScreen", "Successfully imported and verified custom attributes")
+                            android.widget.Toast.makeText(
+                                context,
+                                "IPP attributes imported and verified successfully (${attributes.size} groups)",
+                                android.widget.Toast.LENGTH_SHORT
+                            ).show()
+                        } else {
+                            Log.e("SettingsScreen", "Attributes saved but failed verification reload")
+                            android.widget.Toast.makeText(
+                                context,
+                                "Attributes saved but failed verification. Check logs.",
+                                android.widget.Toast.LENGTH_LONG
+                            ).show()
+                        }
+                    } else {
+                        Log.e("SettingsScreen", "Failed to save IPP attributes to file")
+                        android.widget.Toast.makeText(
+                            context,
+                            "Failed to save IPP attributes to storage",
+                            android.widget.Toast.LENGTH_SHORT
+                        ).show()
+                    }
                 } else {
+                    Log.w("SettingsScreen", "Attribute validation failed")
                     android.widget.Toast.makeText(
                         context,
-                        "Failed to save IPP attributes",
-                        android.widget.Toast.LENGTH_SHORT
+                        "Invalid attributes format - validation failed. Check logs for details.",
+                        android.widget.Toast.LENGTH_LONG
                     ).show()
                 }
             } else {
+                val message = when {
+                    attributes == null -> {
+                        Log.e("SettingsScreen", "Failed to parse attributes file - null result")
+                        "Failed to parse attributes file. Check JSON format and try again."
+                    }
+                    attributes.isEmpty() -> {
+                        Log.w("SettingsScreen", "No valid attributes found in file")
+                        "No valid attributes found in file. Ensure proper IPP attribute structure."
+                    }
+                    else -> {
+                        Log.e("SettingsScreen", "Unknown validation error")
+                        "Unknown error occurred during import."
+                    }
+                }
                 android.widget.Toast.makeText(
                     context,
-                    "Invalid IPP attributes format",
-                    android.widget.Toast.LENGTH_SHORT
+                    message,
+                    android.widget.Toast.LENGTH_LONG
                 ).show()
             }
         }

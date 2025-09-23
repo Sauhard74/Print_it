@@ -1,0 +1,1369 @@
+{
+  "response": {
+    "operation-attributes": {
+      "attributes-charset": {
+        "type": "charset",
+        "value": "utf-8"
+      },
+      "attributes-natural-language": {
+        "type": "naturalLanguage",
+        "value": "en-us"
+      }
+    },
+    "printer-attributes": {
+      "charset-configured": {
+        "type": "charset",
+        "value": "utf-8"
+      },
+      "charset-supported": {
+        "type": "charset",
+        "value": "utf-8"
+      },
+      "color-supported": {
+        "type": "boolean",
+        "value": false
+      },
+      "compression-supported": {
+        "type": "keyword",
+        "value": [
+          "none",
+          "gzip"
+        ]
+      },
+      "copies-default": {
+        "type": "integer",
+        "value": 1
+      },
+      "copies-supported": {
+        "type": "rangeOfInteger",
+        "value": "(1:999)"
+      },
+      "device-service-count": {
+        "type": "integer",
+        "value": 1
+      },
+      "device-uuid": {
+        "type": "uri",
+        "value": "urn:uuid:b191b3c4-cade-407b-9c31-c616ec39a1c5"
+      },
+      "document-format-default": {
+        "type": "mimeMediaType",
+        "value": "application/octet-stream"
+      },
+      "document-format-details-default": {
+        "type": "collection",
+        "value": {
+          "document-format": {
+            "type": "mimeMediaType",
+            "value": "application/octet-stream"
+          },
+          "document-format-version": {
+            "type": "textWithoutLanguage",
+            "value": ""
+          },
+          "document-natural-language": {
+            "type": "naturalLanguage",
+            "value": "en-us"
+          },
+          "document-source-application-name": {
+            "type": "nameWithoutLanguage",
+            "value": "unknown"
+          },
+          "document-source-os-name": {
+            "type": "nameWithoutLanguage",
+            "value": "unknown"
+          }
+        }
+      },
+      "document-format-details-supported": {
+        "type": "keyword",
+        "value": [
+          "document-source-application-name",
+          "document-source-application-version",
+          "document-source-os-name",
+          "document-source-os-version",
+          "document-format",
+          "document-format-device-id",
+          "document-format-version",
+          "document-natural-language"
+        ]
+      },
+      "document-format-preferred": {
+        "type": "mimeMediaType",
+        "value": "image/urf"
+      },
+      "document-format-supported": {
+        "type": "mimeMediaType",
+        "value": [
+          "application/octet-stream",
+          "image/urf",
+          "image/pwg-raster",
+          "application/PCLm",
+          "image/jpeg",
+          "application/postscript",
+          "text/plain",
+          "application/pdf"
+        ]
+      },
+      "document-format-varying-attributes": {
+        "type": "keyword",
+        "value": [
+          "copies-supported",
+          "number-up-supported"
+        ]
+      },
+      "document-password-supported": {
+        "type": "integer",
+        "value": 0
+      },
+      "finishing-template-supported": "no-value",
+      "finishings-col-database": "no-value",
+      "finishings-col-default": "no-value",
+      "finishings-col-ready": "no-value",
+      "finishings-col-supported": {
+        "type": "keyword",
+        "value": "finishing-template-name"
+      },
+      "finishings-default": {
+        "type": "enum",
+        "value": "none"
+      },
+      "finishings-ready": {
+        "type": "enum",
+        "value": "none"
+      },
+      "finishings-supported": {
+        "type": "enum",
+        "value": "none"
+      },
+      "generated-natural-language-supported": {
+        "type": "naturalLanguage",
+        "value": "en-us"
+      },
+      "identify-actions-default": {
+        "type": "keyword",
+        "value": "display"
+      },
+      "identify-actions-supported": {
+        "type": "keyword",
+        "value": [
+          "display",
+          "sound"
+        ]
+      },
+      "ipp-features-supported": {
+        "type": "keyword",
+        "value": [
+          "airprint-1.8",
+          "wfds-print-1.0",
+          "ipp-everywhere"
+        ]
+      },
+      "ipp-versions-supported": {
+        "type": "keyword",
+        "value": [
+          "1.0",
+          "1.1",
+          "2.0"
+        ]
+      },
+      "job-account-id-default": {
+        "type": "nameWithoutLanguage",
+        "value": ""
+      },
+      "job-account-id-supported": {
+        "type": "boolean",
+        "value": false
+      },
+      "job-accounting-user-id-default": {
+        "type": "nameWithoutLanguage",
+        "value": ""
+      },
+      "job-accounting-user-id-supported": {
+        "type": "boolean",
+        "value": false
+      },
+      "job-constraints-supported": {
+        "type": "collection",
+        "value": {
+          "media-col": {
+            "type": "collection",
+            "value": {
+              "media-type": {
+                "type": "keyword",
+                "value": "envelope"
+              }
+            }
+          },
+          "resolver-name": {
+            "type": "nameWithoutLanguage",
+            "value": "duplex_envelope"
+          },
+          "sides": {
+            "type": "keyword",
+            "value": [
+              "two-sided-long-edge",
+              "two-sided-short-edge"
+            ]
+          }
+        }
+      },
+      "job-creation-attributes-supported": {
+        "type": "keyword",
+        "value": [
+          "compression-supplied",
+          "copies",
+          "date-time-at-completed",
+          "date-time-at-creation",
+          "date-time-at-processing",
+          "document-format-details-supplied",
+          "document-format-supplied",
+          "document-format-version-supplied",
+          "document-name-supplied",
+          "finishings",
+          "finishings-col",
+          "ipp-attribute-fidelity",
+          "job-account-id",
+          "job-accounting-user-id",
+          "job-description",
+          "job-id",
+          "job-ids",
+          "job-impressions",
+          "job-impressions-completed",
+          "job-k-octets-processed",
+          "job-media-sheets",
+          "job-media-sheets-completed",
+          "job-name",
+          "job-originating-user-name",
+          "job-originating-user-uri",
+          "job-pages",
+          "job-pages-completed",
+          "job-pages-completed-current-copy",
+          "job-pages-per-set",
+          "job-printer-up-time",
+          "job-printer-uri",
+          "job-sheets",
+          "job-state",
+          "job-state-reasons",
+          "job-state-message",
+          "job-template",
+          "job-uri",
+          "job-uuid",
+          "lexmark.com-debug",
+          "lexmark.com-job-stats",
+          "media",
+          "media-bottom-margin",
+          "media-col",
+          "media-left-margin",
+          "media-right-margin",
+          "media-source",
+          "media-top-margin",
+          "media-type",
+          "multiple-document-handling",
+          "number-up",
+          "orientation-requested",
+          "output-bin",
+          "output-mode",
+          "overrides",
+          "page-ranges",
+          "pclm-source-resolution",
+          "print-color-mode",
+          "print-content-optimize",
+          "print-quality",
+          "print-scaling",
+          "printer-resolution",
+          "sides",
+          "time-at-completed",
+          "time-at-creation",
+          "time-at-processing"
+        ]
+      },
+      "job-ids-supported": {
+        "type": "boolean",
+        "value": true
+      },
+      "job-impressions-supported": {
+        "type": "rangeOfInteger",
+        "value": "(1:2147483647)"
+      },
+      "job-media-sheets-supported": {
+        "type": "rangeOfInteger",
+        "value": "(1:2147483647)"
+      },
+      "job-pages-per-set-supported": {
+        "type": "boolean",
+        "value": true
+      },
+      "job-password-encryption-supported": {
+        "type": "keyword",
+        "value": "none"
+      },
+      "job-password-supported": {
+        "type": "integer",
+        "value": 4
+      },
+      "job-resolvers-supported": {
+        "type": "collection",
+        "value": {
+          "media-col": {
+            "type": "collection",
+            "value": {
+              "media-type": {
+                "type": "keyword",
+                "value": "stationery"
+              }
+            }
+          },
+          "resolver-name": {
+            "type": "nameWithoutLanguage",
+            "value": "duplex_envelope"
+          },
+          "sides": {
+            "type": "keyword",
+            "value": "one-sided"
+          }
+        }
+      },
+      "job-sheets-default": {
+        "type": "keyword",
+        "value": "none"
+      },
+      "job-sheets-supported": {
+        "type": "keyword",
+        "value": [
+          "none",
+          "standard"
+        ]
+      },
+      "jpeg-features-supported": {
+        "type": "keyword",
+        "value": "none"
+      },
+      "jpeg-k-octets-supported": {
+        "type": "rangeOfInteger",
+        "value": "(0:393216)"
+      },
+      "jpeg-x-dimension-supported": {
+        "type": "rangeOfInteger",
+        "value": "(1:32768)"
+      },
+      "jpeg-y-dimension-supported": {
+        "type": "rangeOfInteger",
+        "value": "(1:32768)"
+      },
+      "landscape-orientation-requested-preferred": {
+        "type": "enum",
+        "value": 4
+      },
+      "margins-pre-applied-default": {
+        "type": "boolean",
+        "value": false
+      },
+      "margins-pre-applied-supported": {
+        "type": "boolean",
+        "value": false
+      },
+      "marker-colors": {
+        "type": "nameWithoutLanguage",
+        "value": "#000000"
+      },
+      "marker-high-levels": {
+        "type": "integer",
+        "value": 100
+      },
+      "marker-levels": {
+        "type": "integer",
+        "value": 8
+      },
+      "marker-low-levels": {
+        "type": "integer",
+        "value": 30
+      },
+      "marker-names": {
+        "type": "nameWithoutLanguage",
+        "value": "Black"
+      },
+      "marker-types": {
+        "type": "keyword",
+        "value": "toner-cartridge"
+      },
+      "media-bottom-margin-default": {
+        "type": "integer",
+        "value": 423
+      },
+      "media-bottom-margin-supported": {
+        "type": "integer",
+        "value": 423
+      },
+      "media-col-default": {
+        "type": "collection",
+        "value": {
+          "media-bottom-margin": {
+            "type": "integer",
+            "value": 423
+          },
+          "media-left-margin": {
+            "type": "integer",
+            "value": 423
+          },
+          "media-right-margin": {
+            "type": "integer",
+            "value": 423
+          },
+          "media-size": {
+            "type": "collection",
+            "value": {
+              "x-dimension": {
+                "type": "integer",
+                "value": 21590
+              },
+              "y-dimension": {
+                "type": "integer",
+                "value": 27940
+              }
+            }
+          },
+          "media-source": {
+            "type": "keyword",
+            "value": "tray-1"
+          },
+          "media-source-properties": {
+            "type": "collection",
+            "value": {
+              "media-source-feed-direction": {
+                "type": "octetString",
+                "value": "short-edge-first"
+              },
+              "media-source-feed-orientation": {
+                "type": "integer",
+                "value": 3
+              }
+            }
+          },
+          "media-top-margin": {
+            "type": "integer",
+            "value": 423
+          },
+          "media-type": {
+            "type": "keyword",
+            "value": "stationery"
+          }
+        }
+      },
+      "media-col-ready": {
+        "type": "collection",
+        "value": {
+          "media-bottom-margin": {
+            "type": "integer",
+            "value": 423
+          },
+          "media-left-margin": {
+            "type": "integer",
+            "value": 423
+          },
+          "media-right-margin": {
+            "type": "integer",
+            "value": 423
+          },
+          "media-size": {
+            "type": "collection",
+            "value": {
+              "x-dimension": {
+                "type": "integer",
+                "value": 21590
+              },
+              "y-dimension": {
+                "type": "integer",
+                "value": 27940
+              }
+            }
+          },
+          "media-source": {
+            "type": "keyword",
+            "value": "tray-1"
+          },
+          "media-source-properties": {
+            "type": "collection",
+            "value": {
+              "media-source-feed-direction": {
+                "type": "octetString",
+                "value": "short-edge-first"
+              },
+              "media-source-feed-orientation": {
+                "type": "integer",
+                "value": 3
+              }
+            }
+          },
+          "media-top-margin": {
+            "type": "integer",
+            "value": 423
+          },
+          "media-type": {
+            "type": "keyword",
+            "value": "stationery"
+          }
+        }
+      },
+      "media-col-supported": {
+        "type": "keyword",
+        "value": [
+          "media-size",
+          "media-top-margin",
+          "media-bottom-margin",
+          "media-left-margin",
+          "media-right-margin",
+          "media-source",
+          "media-type"
+        ]
+      },
+      "media-default": {
+        "type": "keyword",
+        "value": "na_letter_8.5x11in"
+      },
+      "media-left-margin-default": {
+        "type": "integer",
+        "value": 423
+      },
+      "media-left-margin-supported": {
+        "type": "integer",
+        "value": 423
+      },
+      "media-ready": {
+        "type": "keyword",
+        "value": "na_letter_8.5x11in"
+      },
+      "media-right-margin-default": {
+        "type": "integer",
+        "value": 423
+      },
+      "media-right-margin-supported": {
+        "type": "integer",
+        "value": 423
+      },
+      "media-size-supported": {
+        "type": "collection",
+        "value": [
+          {
+            "x-dimension": {
+              "type": "integer",
+              "value": 9842
+            },
+            "y-dimension": {
+              "type": "integer",
+              "value": 19050
+            }
+          },
+          {
+            "x-dimension": {
+              "type": "integer",
+              "value": 9842
+            },
+            "y-dimension": {
+              "type": "integer",
+              "value": 22542
+            }
+          },
+          {
+            "x-dimension": {
+              "type": "integer",
+              "value": 10477
+            },
+            "y-dimension": {
+              "type": "integer",
+              "value": 24130
+            }
+          },
+          {
+            "x-dimension": {
+              "type": "integer",
+              "value": 17600
+            },
+            "y-dimension": {
+              "type": "integer",
+              "value": 25000
+            }
+          },
+          {
+            "x-dimension": {
+              "type": "integer",
+              "value": 16200
+            },
+            "y-dimension": {
+              "type": "integer",
+              "value": 22900
+            }
+          },
+          {
+            "x-dimension": {
+              "type": "integer",
+              "value": 11000
+            },
+            "y-dimension": {
+              "type": "integer",
+              "value": 22000
+            }
+          },
+          {
+            "x-dimension": {
+              "type": "integer",
+              "value": 21590
+            },
+            "y-dimension": {
+              "type": "integer",
+              "value": 27940
+            }
+          },
+          {
+            "x-dimension": {
+              "type": "integer",
+              "value": 18200
+            },
+            "y-dimension": {
+              "type": "integer",
+              "value": 25700
+            }
+          },
+          {
+            "x-dimension": {
+              "type": "integer",
+              "value": 10000
+            },
+            "y-dimension": {
+              "type": "integer",
+              "value": 14800
+            }
+          },
+          {
+            "x-dimension": {
+              "type": "integer",
+              "value": 21000
+            },
+            "y-dimension": {
+              "type": "integer",
+              "value": 29700
+            }
+          },
+          {
+            "x-dimension": {
+              "type": "integer",
+              "value": 14800
+            },
+            "y-dimension": {
+              "type": "integer",
+              "value": 21000
+            }
+          },
+          {
+            "x-dimension": {
+              "type": "integer",
+              "value": 21590
+            },
+            "y-dimension": {
+              "type": "integer",
+              "value": 33020
+            }
+          },
+          {
+            "x-dimension": {
+              "type": "integer",
+              "value": 13970
+            },
+            "y-dimension": {
+              "type": "integer",
+              "value": 21590
+            }
+          },
+          {
+            "x-dimension": {
+              "type": "integer",
+              "value": 21590
+            },
+            "y-dimension": {
+              "type": "integer",
+              "value": 34036
+            }
+          },
+          {
+            "x-dimension": {
+              "type": "integer",
+              "value": 10500
+            },
+            "y-dimension": {
+              "type": "integer",
+              "value": 14800
+            }
+          },
+          {
+            "x-dimension": {
+              "type": "integer",
+              "value": 21590
+            },
+            "y-dimension": {
+              "type": "integer",
+              "value": 35560
+            }
+          },
+          {
+            "x-dimension": {
+              "type": "integer",
+              "value": 21590
+            },
+            "y-dimension": {
+              "type": "integer",
+              "value": 35560
+            }
+          },
+          {
+            "x-dimension": {
+              "type": "integer",
+              "value": 18415
+            },
+            "y-dimension": {
+              "type": "integer",
+              "value": 26670
+            }
+          },
+          {
+            "x-dimension": {
+              "type": "rangeOfInteger",
+              "value": "(9812:21590)"
+            },
+            "y-dimension": {
+              "type": "rangeOfInteger",
+              "value": "(14808:35991)"
+            }
+          }
+        ]
+      },
+      "media-source-default": {
+        "type": "keyword",
+        "value": "tray-1"
+      },
+      "media-source-supported": {
+        "type": "keyword",
+        "value": [
+          "auto",
+          "envelope",
+          "manual",
+          "tray-1"
+        ]
+      },
+      "media-supported": {
+        "type": "keyword",
+        "value": [
+          "na_monarch_3.875x7.5in",
+          "na_number-9_3.875x8.875in",
+          "na_number-10_4.125x9.5in",
+          "iso_b5_176x250mm",
+          "iso_c5_162x229mm",
+          "iso_dl_110x220mm",
+          "na_letter_8.5x11in",
+          "jis_b5_182x257mm",
+          "jpn_hagaki_100x148mm",
+          "iso_a4_210x297mm",
+          "iso_a5_148x210mm",
+          "na_foolscap_8.5x13in",
+          "na_invoice_5.5x8.5in",
+          "na_oficio_8.5x13.4in",
+          "iso_a6_105x148mm",
+          "oe_universal_8.5x14in",
+          "na_legal_8.5x14in",
+          "na_executive_7.25x10.5in",
+          "custom_min_98.12x148.08mm",
+          "custom_max_215.9x359.91mm"
+        ]
+      },
+      "media-top-margin-default": {
+        "type": "integer",
+        "value": 423
+      },
+      "media-top-margin-supported": {
+        "type": "integer",
+        "value": 423
+      },
+      "media-type-default": {
+        "type": "keyword",
+        "value": "stationery"
+      },
+      "media-type-supported": {
+        "type": "keyword",
+        "value": [
+          "envelope",
+          "stationery",
+          "custom-media-type-coloredpaper",
+          "cardstock",
+          "labels",
+          "stationery-letterhead",
+          "stationery-preprinted",
+          "custom-media-type-bond",
+          "stationery-lightweight",
+          "stationery-heavyweight",
+          "custom-media-type-recycled"
+        ]
+      },
+      "mopria-certified": {
+        "type": "textWithoutLanguage",
+        "value": "2.0"
+      },
+      "multiple-document-handling-default": {
+        "type": "keyword",
+        "value": "separate-documents-collated-copies"
+      },
+      "multiple-document-handling-supported": {
+        "type": "keyword",
+        "value": [
+          "separate-documents-uncollated-copies",
+          "separate-documents-collated-copies"
+        ]
+      },
+      "multiple-document-jobs-supported": {
+        "type": "boolean",
+        "value": false
+      },
+      "multiple-operation-time-out": {
+        "type": "integer",
+        "value": 120
+      },
+      "multiple-operation-time-out-action": {
+        "type": "keyword",
+        "value": "abort-job"
+      },
+      "natural-language-configured": {
+        "type": "naturalLanguage",
+        "value": "en-us"
+      },
+      "number-up-default": {
+        "type": "integer",
+        "value": 1
+      },
+      "number-up-supported": {
+        "type": "integer",
+        "value": [
+          1,
+          2,
+          3,
+          4,
+          6,
+          9,
+          12,
+          16
+        ]
+      },
+      "operations-supported": {
+        "type": "enum",
+        "value": [
+          "Print-Job",
+          "Validate-Job",
+          "Create-Job",
+          "Send-Document",
+          "Cancel-Job",
+          "Get-Job-Attributes",
+          "Get-Jobs",
+          "Get-Printer-Attributes",
+          "Pause-Printer",
+          "Resume-Printer",
+          "Purge-Jobs",
+          "Cancel-My-Jobs",
+          "Close-Job",
+          "Identify-Printer"
+        ]
+      },
+      "orientation-requested-default": {
+        "type": "enum",
+        "value": "portrait"
+      },
+      "orientation-requested-supported": {
+        "type": "enum",
+        "value": [
+          "portrait",
+          "landscape",
+          "reverse-portrait",
+          "reverse-landscape",
+          "none"
+        ]
+      },
+      "output-bin-default": {
+        "type": "keyword",
+        "value": "face-down"
+      },
+      "output-bin-supported": {
+        "type": "keyword",
+        "value": "face-down"
+      },
+      "output-mode-default": {
+        "type": "keyword",
+        "value": "monochrome"
+      },
+      "output-mode-supported": {
+        "type": "keyword",
+        "value": [
+          "auto",
+          "monochrome",
+          "auto-monochrome"
+        ]
+      },
+      "overrides-supported": {
+        "type": "keyword",
+        "value": [
+          "pages",
+          "document-numbers"
+        ]
+      },
+      "page-ranges-supported": {
+        "type": "boolean",
+        "value": true
+      },
+      "pages-per-minute": {
+        "type": "integer",
+        "value": 36
+      },
+      "pclm-raster-back-side": {
+        "type": "keyword",
+        "value": "normal"
+      },
+      "pclm-source-resolution-supported": {
+        "type": "resolution",
+        "value": [
+          "300x300dpi",
+          "600x600dpi"
+        ]
+      },
+      "pclm-strip-height-preferred": {
+        "type": "integer",
+        "value": 128
+      },
+      "pclm-strip-height-supported": {
+        "type": "integer",
+        "value": [
+          16,
+          32,
+          64,
+          128,
+          256
+        ]
+      },
+      "pdf-fit-to-page": {
+        "type": "boolean",
+        "value": true
+      },
+      "pdf-fit-to-page-default": {
+        "type": "boolean",
+        "value": true
+      },
+      "pdf-fit-to-page-supported": {
+        "type": "boolean",
+        "value": true
+      },
+      "pdf-k-octets-supported": {
+        "type": "rangeOfInteger",
+        "value": "(0:0)"
+      },
+      "pdf-size-constraints": {
+        "type": "rangeOfInteger",
+        "value": "(1:1)"
+      },
+      "pdf-versions-supported": {
+        "type": "keyword",
+        "value": "none"
+      },
+      "pdl-override-supported": {
+        "type": "keyword",
+        "value": "attempted"
+      },
+      "preferred-attributes-supported": {
+        "type": "boolean",
+        "value": false
+      },
+      "print-color-mode-default": {
+        "type": "keyword",
+        "value": "monochrome"
+      },
+      "print-color-mode-supported": {
+        "type": "keyword",
+        "value": [
+          "auto",
+          "monochrome",
+          "auto-monochrome"
+        ]
+      },
+      "print-content-optimize-default": {
+        "type": "keyword",
+        "value": "auto"
+      },
+      "print-content-optimize-supported": {
+        "type": "keyword",
+        "value": [
+          "auto",
+          "photo",
+          "graphics",
+          "text",
+          "text-and-graphics"
+        ]
+      },
+      "print-quality-default": {
+        "type": "enum",
+        "value": "normal"
+      },
+      "print-quality-supported": {
+        "type": "enum",
+        "value": "normal"
+      },
+      "print-scaling-default": {
+        "type": "keyword",
+        "value": "auto"
+      },
+      "print-scaling-supported": {
+        "type": "keyword",
+        "value": [
+          "auto",
+          "auto-fit",
+          "fill",
+          "fit",
+          "none"
+        ]
+      },
+      "printer-alert": {
+        "type": "octetString",
+        "value": "code=subunitAlmostEmpty;severity=non-critical"
+      },
+      "printer-alert-description": {
+        "type": "textWithoutLanguage",
+        "value": "Cartridge low"
+      },
+      "printer-config-change-date-time": {
+        "type": "dateTime",
+        "value": "2025-7-1,13:38:22.0,-6:0"
+      },
+      "printer-config-change-time": {
+        "type": "integer",
+        "value": 46
+      },
+      "printer-current-time": {
+        "type": "dateTime",
+        "value": "2025-8-12,14:23:3.0,-6:0"
+      },
+      "printer-device-id": {
+        "type": "textWithoutLanguage",
+        "value": "MANUFACTURER:Lexmark;COMMAND SET:PCL 6 Emulation, PostScript Level 3 Emulation, URF, PWG, NPAP, PJL;MODEL:Lexmark MB2200 Series;CLS:PRINTER;DES:Lexmark MB2236adwe;CID:LexmarkPrinterMonoB;COMMENT:ECP1.0, LV_043D, LP_031F, LF_00CC;"
+      },
+      "printer-dns-sd-name": {
+        "type": "nameWithoutLanguage",
+        "value": "Lexmark MB2236adwe"
+      },
+      "printer-firmware-name": {
+        "type": "nameWithoutLanguage",
+        "value": [
+          "IPP",
+          "JPEG",
+          "PDF",
+          "URF",
+          "FirmwareVersion"
+        ]
+      },
+      "printer-firmware-string-version": {
+        "type": "textWithoutLanguage",
+        "value": [
+          "2.0",
+          "1.02",
+          "1.7",
+          "1.4",
+          "071.016"
+        ]
+      },
+      "printer-firmware-version": {
+        "type": "octetString",
+        "value": [
+          "<0200>",
+          "<0102>",
+          "<0170>",
+          "<0140>",
+          "071.016"
+        ]
+      },
+      "printer-geo-location": "unknown",
+      "printer-get-attributes-supported": {
+        "type": "keyword",
+        "value": [
+          "all",
+          "attributes-charset",
+          "attributes-natural-language",
+          "compression",
+          "copies",
+          "document-format",
+          "document-format-details",
+          "document-format-device-id",
+          "document-format-version",
+          "document-name",
+          "document-natural-language",
+          "document-source-application-name",
+          "document-source-application-version",
+          "document-source-os-name",
+          "document-source-os-version",
+          "document-uri",
+          "finishings",
+          "finishings-col",
+          "first-index",
+          "identify-actions",
+          "job-account-id",
+          "job-accounting-user-id",
+          "job-originating-user",
+          "job-pages-per-set",
+          "job-password",
+          "job-password-encryption",
+          "job-sheets",
+          "job-template",
+          "last-document",
+          "lexmark.com-debug",
+          "lexmark.com-document-format",
+          "lexmark.com-job-timeout",
+          "lexmark.com-generate-job-stats",
+          "limit",
+          "media",
+          "media-bottom-margin",
+          "media-col",
+          "media-left-margin",
+          "media-right-margin",
+          "media-source",
+          "media-top-margin",
+          "media-type",
+          "message",
+          "multiple-document-handling",
+          "my-jobs",
+          "number-up",
+          "orientation-requested",
+          "output-bin",
+          "output-mode",
+          "overrides",
+          "page-ranges",
+          "pclm-source-resolution",
+          "print-color-mode",
+          "print-content-optimize",
+          "print-quality",
+          "print-scaling",
+          "printer-resolution",
+          "printer-uri",
+          "requested-attributes",
+          "requesting-user-name",
+          "requesting-user-uri",
+          "sides",
+          "which-jobs"
+        ]
+      },
+      "printer-icons": {
+        "type": "uri",
+        "value": [
+          "http://100.107.108.250/images/model/mfp/printer204.48x48.png",
+          "http://100.107.108.250/images/model/mfp/printer204.128x128.png",
+          "http://100.107.108.250/images/model/mfp/printer204.512x512.png"
+        ]
+      },
+      "printer-info": {
+        "type": "textWithoutLanguage",
+        "value": "Monochrome - Up to 36 Pages/Minute"
+      },
+      "printer-input-tray": {
+        "type": "octetString",
+        "value": [
+          "name=auto;type=other;dimunit=micrometers;mediafeed=279400;mediaxfeed=215900;unit=sheets;maxcapacity=250;level=-3;status=0;",
+          "name=envelope;type=sheetFeedManual;dimunit=micrometers;mediafeed=241300;mediaxfeed=104770;unit=sheets;maxcapacity=1;level=-2;status=0;",
+          "name=manual;type=sheetFeedManual;dimunit=micrometers;mediafeed=355600;mediaxfeed=215900;unit=sheets;maxcapacity=1;level=-2;status=0;",
+          "name=tray-1;type=sheetFeedAutoNonRemovableTray;dimunit=micrometers;mediafeed=279400;mediaxfeed=215900;unit=sheets;maxcapacity=250;level=-3;status=0;"
+        ]
+      },
+      "printer-is-accepting-jobs": {
+        "type": "boolean",
+        "value": true
+      },
+      "printer-kind": {
+        "type": "keyword",
+        "value": [
+          "document",
+          "envelope",
+          "label"
+        ]
+      },
+      "printer-location": {
+        "type": "textWithoutLanguage",
+        "value": ""
+      },
+      "printer-make-and-model": {
+        "type": "textWithoutLanguage",
+        "value": "Lexmark MB2236adwe"
+      },
+      "printer-more-info": {
+        "type": "uri",
+        "value": "http://100.107.108.250/#/Settings/Network/AirPrint"
+      },
+      "printer-name": {
+        "type": "nameWithoutLanguage",
+        "value": "Lexmark MB2236adwe"
+      },
+      "printer-organization": {
+        "type": "textWithoutLanguage",
+        "value": "no-value"
+      },
+      "printer-organizational-unit": {
+        "type": "textWithoutLanguage",
+        "value": "no-value"
+      },
+      "printer-output-tray": {
+        "type": "octetString",
+        "value": "name=face-down;type=unRemovableBin;unit=sheets;maxcapacity=150;remaining=-3;status=0;stackingorder=firstToLast;pagedelivery=faceDown;"
+      },
+      "printer-resolution-default": {
+        "type": "resolution",
+        "value": "600x600dpi"
+      },
+      "printer-resolution-supported": {
+        "type": "resolution",
+        "value": [
+          "300x300dpi",
+          "600x600dpi"
+        ]
+      },
+      "printer-settable-attributes-supported": {
+        "type": "keyword",
+        "value": "none"
+      },
+      "printer-state": {
+        "type": "enum",
+        "value": "idle"
+      },
+      "printer-state-change-date-time": {
+        "type": "dateTime",
+        "value": "2025-7-28,15:15:38.0,-6:0"
+      },
+      "printer-state-change-time": {
+        "type": "integer",
+        "value": 2338682
+      },
+      "printer-state-message": {
+        "type": "textWithoutLanguage",
+        "value": "Printer is idle."
+      },
+      "printer-state-reasons": {
+        "type": "keyword",
+        "value": "toner-low-warning"
+      },
+      "printer-supplies-info-uri": {
+        "type": "uri",
+        "value": "http://100.107.108.250/"
+      },
+      "printer-supply": {
+        "type": "octetString",
+        "value": "type=toner;maxcapacity=100;level=8;colorantname=black;"
+      },
+      "printer-supply-description": {
+        "type": "textWithLanguage",
+        "value": {
+          "language": "en-us",
+          "value": "Black Toner Cartridge S/N:CAG2007201CD"
+        }
+      },
+      "printer-supply-info-uri": {
+        "type": "uri",
+        "value": "http://100.107.108.250/"
+      },
+      "printer-up-time": {
+        "type": "integer",
+        "value": 3631526
+      },
+      "printer-uri-supported": {
+        "type": "uri",
+        "value": [
+          "ipp://100.107.108.250:631/ipp/print",
+          "ipps://100.107.108.250:443/ipp/print"
+        ]
+      },
+      "printer-uuid": {
+        "type": "uri",
+        "value": "urn:uuid:b191b3c4-cade-407b-9c31-c616ec39a1c5"
+      },
+      "printer-wifi-ssid": {
+        "type": "nameWithoutLanguage",
+        "value": "Figgie Smalls"
+      },
+      "printer-wifi-state": {
+        "type": "enum",
+        "value": 3
+      },
+      "pwg-raster-document-resolution-supported": {
+        "type": "resolution",
+        "value": [
+          "300x300dpi",
+          "600x600dpi"
+        ]
+      },
+      "pwg-raster-document-sheet-back": {
+        "type": "keyword",
+        "value": "normal"
+      },
+      "pwg-raster-document-type-supported": {
+        "type": "keyword",
+        "value": [
+          "black_1",
+          "black_8"
+        ]
+      },
+      "queued-job-count": {
+        "type": "integer",
+        "value": 0
+      },
+      "requesting-user-uri-supported": {
+        "type": "boolean",
+        "value": true
+      },
+      "sides-default": {
+        "type": "keyword",
+        "value": "one-sided"
+      },
+      "sides-supported": {
+        "type": "keyword",
+        "value": [
+          "one-sided",
+          "two-sided-long-edge",
+          "two-sided-short-edge"
+        ]
+      },
+      "urf-supported": {
+        "type": "keyword",
+        "value": [
+          "V1.4",
+          "CP1",
+          "PQ4",
+          "W8",
+          "MT1-2-3-4-5-6-8-10-11-12-13",
+          "RS300-600",
+          "DM1",
+          "OB10",
+          "IS5-4-20",
+          "IFU5-4",
+          "FN3"
+        ]
+      },
+      "uri-authentication-supported": {
+        "type": "keyword",
+        "value": [
+          "none",
+          "none"
+        ]
+      },
+      "uri-security-supported": {
+        "type": "keyword",
+        "value": [
+          "none",
+          "tls"
+        ]
+      },
+      "which-jobs-supported": {
+        "type": "keyword",
+        "value": [
+          "completed",
+          "not-completed"
+        ]
+      }
+    }
+  },
+  "status": "successful-ok"
+}
