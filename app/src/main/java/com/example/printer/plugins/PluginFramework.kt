@@ -645,24 +645,31 @@ class DelaySimulatorPlugin : PrinterPlugin {
     
     private var delayMs: Long = 1000L
     private var randomDelay: Boolean = false
+    private var lastCalculatedDelay: Long = 0L // Store the last delay for consistent reporting
     
     override suspend fun onLoad(context: Context): Boolean = true
     
     override suspend fun onUnload(): Boolean = true
     
-    override suspend fun processJob(job: PrintJob, documentBytes: ByteArray): JobProcessingResult? {
-        val actualDelay = if (randomDelay) {
+    override suspend fun beforeJobProcessing(job: PrintJob): Boolean {
+        // Calculate delay once and store it
+        lastCalculatedDelay = if (randomDelay) {
             (delayMs * 0.5 + Math.random() * delayMs).toLong()
         } else {
             delayMs
         }
         
-        kotlinx.coroutines.delay(actualDelay)
+        kotlinx.coroutines.delay(lastCalculatedDelay)
         
+        return true // Continue processing
+    }
+    
+    override suspend fun processJob(job: PrintJob, documentBytes: ByteArray): JobProcessingResult? {
+        // Return the same delay that was actually used
         return JobProcessingResult(
             processedBytes = null,
             modifiedJob = null,
-            customMetadata = mapOf("simulated_delay_ms" to actualDelay)
+            customMetadata = mapOf("simulated_delay_ms" to lastCalculatedDelay)
         )
     }
     

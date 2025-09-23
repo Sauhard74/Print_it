@@ -33,7 +33,8 @@ import kotlinx.coroutines.launch
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PluginManagementScreen(
-    onBackClick: () -> Unit
+    onBackClick: () -> Unit,
+    printerService: com.example.printer.printer.PrinterService? = null
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
@@ -101,7 +102,43 @@ fun PluginManagementScreen(
                 )
             }
             
-            // Plugin List Header
+            // Loaded Plugins Section
+            if (printerService != null && loadedPluginIds.isNotEmpty()) {
+                item {
+                    Text(
+                        text = "Active Plugins",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(vertical = 8.dp)
+                    )
+                }
+                
+                items(availablePlugins.filter { it.enabled && loadedPluginIds.contains(it.id) }) { plugin ->
+                    LoadedPluginCard(
+                        plugin = plugin,
+                        printerService = printerService,
+                        pluginFramework = pluginFramework,
+                        onUnload = { pluginId ->
+                            coroutineScope.launch {
+                                val success = printerService.unloadPlugin(pluginId)
+                                android.widget.Toast.makeText(
+                                    context,
+                                    if (success) "Plugin unloaded: ${plugin.name}" else "Failed to unload plugin",
+                                    android.widget.Toast.LENGTH_SHORT
+                                ).show()
+                            }
+                        },
+                        onConfigure = { pluginId ->
+                            availablePlugins.find { it.id == pluginId }?.let { p ->
+                                pluginToConfig = p
+                                showConfigDialog = true
+                            }
+                        }
+                    )
+                }
+            }
+            
+            // Available Plugins Header
             item {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -111,7 +148,8 @@ fun PluginManagementScreen(
                     Text(
                         text = "Available Plugins",
                         style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(top = if (loadedPluginIds.isNotEmpty()) 16.dp else 0.dp)
                     )
                     
                     // Bulk actions could go here
@@ -127,8 +165,9 @@ fun PluginManagementScreen(
                     EmptyPluginsCard()
                 }
             } else {
-                items(availablePlugins) { plugin ->
-                    PluginCard(
+            // Plugin Cards (only show unloaded plugins)
+            items(availablePlugins.filter { !loadedPluginIds.contains(it.id) }) { plugin ->
+                PluginCard(
                         plugin = plugin,
                         isLoaded = plugin.id in loadedPluginIds,
                         onTogglePlugin = { metadata ->
@@ -674,5 +713,122 @@ fun PluginConfigurationDialog(
             }
         }
     )
+}
+
+@Composable
+fun LoadedPluginCard(
+    plugin: PluginMetadata,
+    printerService: com.example.printer.printer.PrinterService,
+    pluginFramework: PluginFramework,
+    onUnload: (String) -> Unit,
+    onConfigure: (String) -> Unit
+) {
+    val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
+    
+    var configuration by remember { mutableStateOf(mapOf<String, Any>()) }
+    
+    // Load current configuration
+    LaunchedEffect(plugin.id) {
+        val config = pluginFramework.getPluginConfiguration(plugin.id)
+        if (config != null) {
+            configuration = config
+        }
+    }
+    
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.primaryContainer
+        )
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = plugin.name,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        text = "Active • ${plugin.version}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+                
+                Icon(
+                    imageVector = Icons.Default.CheckCircle,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary
+                )
+            }
+            
+            Text(
+                text = plugin.description,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            
+            // Show current configuration if available
+            if (configuration.isNotEmpty()) {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.secondaryContainer
+                    )
+                ) {
+                    Column(modifier = Modifier.padding(12.dp)) {
+                        Text(
+                            text = "Current Configuration:",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSecondaryContainer
+                        )
+                        configuration.forEach { (key, value) ->
+                            Text(
+                                text = "• $key: $value",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSecondaryContainer
+                            )
+                        }
+                    }
+                }
+            }
+            
+            // Action buttons
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                OutlinedButton(
+                    onClick = { onConfigure(plugin.id) },
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Icon(Icons.Default.Settings, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Configure")
+                }
+                
+                Button(
+                    onClick = { onUnload(plugin.id) },
+                    modifier = Modifier.weight(1f),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.error
+                    )
+                ) {
+                    Icon(Icons.Default.Close, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Unload")
+                }
+            }
+        }
+    }
 }
 

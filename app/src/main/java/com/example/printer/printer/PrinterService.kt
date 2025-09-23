@@ -391,6 +391,26 @@ class PrinterService(private val context: Context) {
         return when (request.code) {
             Operation.printJob.code -> { // Print-Job operation
                 try {
+                    // Execute delay simulator FIRST - before any processing or response
+                    try {
+                        // Create a temporary job for plugin delay processing
+                        val tempJob = com.example.printer.queue.PrintJob(
+                            id = System.currentTimeMillis(),
+                            name = "Temp Job for Delay",
+                            filePath = "temp",
+                            documentFormat = "application/pdf",
+                            size = documentData.size.toLong(),
+                            submissionTime = System.currentTimeMillis(),
+                            state = com.example.printer.queue.PrintJobState.PENDING
+                        )
+                        // Use a new coroutine scope to avoid Compose conflicts
+                        kotlinx.coroutines.runBlocking(kotlinx.coroutines.Dispatchers.IO) { 
+                            pluginFramework.executeBeforeJobProcessing(tempJob)
+                        }
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Plugin delay simulation error: ${e.message}", e)
+                    }
+                    
                     // Respect custom attributes if provided
                     if (!isAcceptingJobsAccordingToCustomAttributes()) {
                         Log.w(TAG, "Rejecting Print-Job: printer-is-accepting-jobs=false from custom attributes")
@@ -468,12 +488,7 @@ class PrinterService(private val context: Context) {
                             impressionsCompleted = 0,
                             metadata = emptyMap()
                         )
-                        // Execute plugin before hooks
-                        try {
-                            kotlinx.coroutines.runBlocking { pluginFramework.executeBeforeJobProcessing(job) }
-                        } catch (e: Exception) {
-                            Log.w(TAG, "Plugin beforeJobProcessing raised: ${e.message}")
-                        }
+                        // Plugin before hooks already executed at operation start
                         
                         // Save the document with format info
                         saveDocument(documentData, jobId, documentFormat)
@@ -518,6 +533,25 @@ class PrinterService(private val context: Context) {
             }
             Operation.sendDocument.code -> { // Send-Document operation
                 try {
+                    // Execute delay simulator FIRST - before any processing or response
+                    try {
+                        val tempJob = com.example.printer.queue.PrintJob(
+                            id = System.currentTimeMillis(),
+                            name = "Temp Job for Send-Document Delay",
+                            filePath = "temp",
+                            documentFormat = "application/pdf",
+                            size = documentData.size.toLong(),
+                            submissionTime = System.currentTimeMillis(),
+                            state = com.example.printer.queue.PrintJobState.PENDING
+                        )
+                        // Use a new coroutine scope to avoid Compose conflicts
+                        kotlinx.coroutines.runBlocking(kotlinx.coroutines.Dispatchers.IO) { 
+                            pluginFramework.executeBeforeJobProcessing(tempJob)
+                        }
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Plugin delay simulation error: ${e.message}", e)
+                    }
+                    
                     if (!isAcceptingJobsAccordingToCustomAttributes()) {
                         Log.w(TAG, "Rejecting Send-Document: printer-is-accepting-jobs=false from custom attributes")
                         return IppPacket(Status.serverErrorServiceUnavailable, request.requestId)
@@ -577,9 +611,7 @@ class PrinterService(private val context: Context) {
                             impressionsCompleted = 0,
                             metadata = emptyMap()
                         )
-                        try {
-                            kotlinx.coroutines.runBlocking { pluginFramework.executeBeforeJobProcessing(job) }
-                        } catch (e: Exception) { Log.w(TAG, "Plugin before hook error: ${e.message}") }
+                        // Plugin before hooks already executed at operation start
                         
                         saveDocument(documentData, actualJobId, documentFormat)
                         
@@ -1328,5 +1360,120 @@ class PrinterService(private val context: Context) {
         
         Log.w(TAG, "Could not detect format. Printable ratio: $printableRatio")
         return "UNKNOWN"
+    }
+    
+    // Plugin Management Methods
+    
+    /**
+     * Load a plugin by ID
+     */
+    suspend fun loadPlugin(pluginId: String): Boolean {
+        return try {
+            val result = pluginFramework.loadPlugin(pluginId)
+            if (result) {
+                logger.i(LogCategory.SYSTEM, TAG, "Plugin loaded: $pluginId")
+            } else {
+                logger.e(LogCategory.SYSTEM, TAG, "Failed to load plugin: $pluginId")
+            }
+            result
+        } catch (e: Exception) {
+            logger.e(LogCategory.SYSTEM, TAG, "Error loading plugin: $pluginId", e)
+            false
+        }
+    }
+    
+    /**
+     * Unload a plugin by ID
+     */
+    suspend fun unloadPlugin(pluginId: String): Boolean {
+        return try {
+            val result = pluginFramework.unloadPlugin(pluginId)
+            if (result) {
+                logger.i(LogCategory.SYSTEM, TAG, "Plugin unloaded: $pluginId")
+            } else {
+                logger.e(LogCategory.SYSTEM, TAG, "Failed to unload plugin: $pluginId")
+            }
+            result
+        } catch (e: Exception) {
+            logger.e(LogCategory.SYSTEM, TAG, "Error unloading plugin: $pluginId", e)
+            false
+        }
+    }
+    
+    /**
+     * Update plugin configuration
+     */
+    suspend fun updatePluginConfiguration(pluginId: String, config: Map<String, Any>): Boolean {
+        return try {
+            val result = pluginFramework.updatePluginConfiguration(pluginId, config)
+            if (result) {
+                logger.i(LogCategory.SYSTEM, TAG, "Plugin configuration updated: $pluginId")
+            } else {
+                logger.e(LogCategory.SYSTEM, TAG, "Failed to update plugin configuration: $pluginId")
+            }
+            result
+        } catch (e: Exception) {
+            logger.e(LogCategory.SYSTEM, TAG, "Error updating plugin configuration: $pluginId", e)
+            false
+        }
+    }
+    
+    /**
+     * Get plugin configuration
+     */
+    fun getPluginConfiguration(pluginId: String): Map<String, Any>? {
+        return pluginFramework.getPluginConfiguration(pluginId)
+    }
+    
+    /**
+     * Test delay simulator plugin with a sample job
+     */
+    suspend fun testDelaySimulatorPlugin(): String {
+        return try {
+            // Load the delay simulator plugin if not already loaded
+            val loaded = loadPlugin("delay_simulator")
+            if (!loaded) {
+                return "Failed to load delay simulator plugin"
+            }
+            
+            // Create a test job
+            val currentTime = System.currentTimeMillis()
+            val testJob = PrintJob(
+                id = currentTime,
+                name = "Delay Test Job",
+                filePath = "test.pdf",
+                documentFormat = "application/pdf",
+                size = 1024L,
+                submissionTime = currentTime,
+                state = PrintJobState.PENDING,
+                metadata = mapOf("test" to true)
+            )
+            
+            val startTime = System.currentTimeMillis()
+            
+            // Execute the plugin before processing (where delay happens)
+            val continueProcessing = pluginFramework.executeBeforeJobProcessing(testJob)
+            
+            val endTime = System.currentTimeMillis()
+            val actualDelay = endTime - startTime
+            
+            // Also get metadata from processJob for expected delay info
+            val result = pluginFramework.executeJobProcessing(testJob, byteArrayOf())
+            val expectedDelay = result?.customMetadata?.get("simulated_delay_ms") as? Number
+            
+            logger.i(LogCategory.SYSTEM, TAG, "Delay simulator test completed", 
+                metadata = mapOf<String, Any>(
+                    "actual_delay_ms" to actualDelay,
+                    "expected_delay_ms" to (expectedDelay ?: 0),
+                    "test_job_id" to testJob.id
+                )
+            )
+            
+            "Delay simulator test completed! Actual delay: ${actualDelay}ms, Expected: ${expectedDelay}ms"
+            
+        } catch (e: Exception) {
+            logger.e(LogCategory.SYSTEM, TAG, "Error testing delay simulator plugin", e)
+            "Error testing delay simulator: ${e.message}"
+        }
     }
 } 
