@@ -1,0 +1,49 @@
+{
+  "response": {
+    "operation-attributes": {
+      "attributes-charset": {
+        "type": "charset",
+        "value": "utf-8"
+      },
+      "attributes-natural-language": {
+        "type": "naturalLanguage",
+        "value": "en-us"
+      }
+    },
+    "printer-attributes": {
+      "printer-name": {
+        "type": "nameWithoutLanguage",
+        "value": "Test Virtual Printer"
+      },
+      "printer-state": {
+        "type": "enum",
+        "value": 3
+      },
+      "printer-is-accepting-jobs": {
+        "type": "boolean",
+        "value": true
+      },
+      "document-format-supported": {
+        "type": "mimeMediaType",
+        "value": [
+          "application/pdf",
+          "application/postscript",
+          "image/jpeg",
+          "image/png",
+          "text/plain",
+          "application/octet-stream"
+        ]
+      },
+      "operations-supported": {
+        "type": "enum",
+        "value": [
+          "Print-Job",
+          "Get-Printer-Attributes",
+          "Create-Job",
+          "Send-Document",
+          "Cancel-Job"
+        ]
+      }
+    }
+  }
+}
