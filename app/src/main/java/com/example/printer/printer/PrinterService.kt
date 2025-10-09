@@ -56,6 +56,14 @@ class PrinterService(private val context: Context) {
     private var simulateErrorMode = false
     private var errorType = "none" // Options: "none", "server-error", "client-error", "aborted", "unsupported-format"
     
+    // Service status tracking
+    enum class ServiceStatus(val displayName: String, val description: String) {
+        STOPPED("Stopped", "Printer service is not running"),
+        STARTING("Starting", "Printer service is initializing"),
+        RUNNING("Running", "Printer service is active and accepting jobs"),
+        ERROR_SIMULATION("Error Mode", "Printer is simulating errors for testing")
+    }
+    
     private val printJobsDirectory: File by lazy {
         File(context.filesDir, "print_jobs").apply {
             if (!exists()) mkdirs()
@@ -112,6 +120,18 @@ class PrinterService(private val context: Context) {
     }
     
     fun getPort(): Int = PORT
+    
+    /**
+     * Get current service status
+     */
+    fun getServiceStatus(): ServiceStatus {
+        return when {
+            simulateErrorMode -> ServiceStatus.ERROR_SIMULATION
+            server == null -> ServiceStatus.STOPPED
+            registrationListener == null -> ServiceStatus.STARTING
+            else -> ServiceStatus.RUNNING
+        }
+    }
     
     /**
      * Configures error simulation

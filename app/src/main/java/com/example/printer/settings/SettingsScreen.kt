@@ -21,8 +21,11 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.background
+import androidx.compose.foundation.shape.CircleShape
 import com.example.printer.printer.PrinterService
 import com.example.printer.utils.FileUtils
 import com.example.printer.utils.IppAttributesUtils
@@ -31,8 +34,12 @@ import com.example.printer.utils.PrinterDiscoveryUtils
 import com.hp.jipp.encoding.AttributeGroup
 import com.hp.jipp.encoding.Tag
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
+import kotlin.coroutines.coroutineContext
+import kotlinx.coroutines.isActive
 import java.io.File
 import java.io.FileOutputStream
+import java.util.UUID
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -57,6 +64,9 @@ fun SettingsScreen(
     }
     var availableAttributeFiles by remember { mutableStateOf(IppAttributesUtils.getAvailableIppAttributeFiles(context)) }
     
+    // Service status tracking with reactive updates
+    var serviceStatus by remember { mutableStateOf(printerService.getServiceStatus()) }
+    
     // Load saved custom attributes on startup
     LaunchedEffect(selectedAttributesFile) {
         selectedAttributesFile?.let { filename ->
@@ -65,6 +75,30 @@ fun SettingsScreen(
                 printerService.setCustomIppAttributes(attributes)
                 Log.d("SettingsScreen", "Restored custom attributes: ${attributes.size} groups")
             }
+        }
+    }
+    
+    // Smart polling for service status updates
+    LaunchedEffect(Unit) {
+        var stableCount = 0
+        
+        while (coroutineContext.isActive) {
+            val currentStatus = printerService.getServiceStatus()
+            if (currentStatus != serviceStatus) {
+                serviceStatus = currentStatus
+                stableCount = 0 // Reset stability counter on change
+            } else {
+                stableCount++
+            }
+            
+            // Dynamic polling: fast when changing, slow when stable
+            val pollInterval = when {
+                stableCount < 3 -> 500L  // 0.5s for first few stable reads
+                stableCount < 10 -> 2000L // 2s for moderately stable
+                else -> 5000L             // 5s for very stable
+            }
+            
+            delay(pollInterval)
         }
     }
     
@@ -183,7 +217,22 @@ fun SettingsScreen(
                         }
                         
                         Spacer(modifier = Modifier.height(8.dp))
-                        Text("Status: Running") 
+                        // Dynamic status display with color indicator
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            val statusColor = when (serviceStatus) {
+                                PrinterService.ServiceStatus.RUNNING -> Color.Green
+                                PrinterService.ServiceStatus.ERROR_SIMULATION -> Color.Yellow
+                                PrinterService.ServiceStatus.STARTING -> Color.Blue
+                                PrinterService.ServiceStatus.STOPPED -> Color.Red
+                            }
+                            Box(
+                                modifier = Modifier
+                                    .size(8.dp)
+                                    .background(statusColor, CircleShape)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Status: ${serviceStatus.displayName}")
+                        } 
                         Spacer(modifier = Modifier.height(8.dp))
                         Text("Port: ${printerService.getPort()}")
                         Spacer(modifier = Modifier.height(8.dp))
@@ -961,7 +1010,7 @@ private fun handleImportAttributes(
             val jsonString = inputStream.bufferedReader().use { it.readText() }
             
             // Create a temporary file and use IppAttributesUtils to handle both array and object formats
-            val tempFilename = "temp_import_${System.currentTimeMillis()}.json"
+            val tempFilename = "temp_import_${UUID.randomUUID()}.json"
             val attributesDir = File(context.filesDir, "ipp_attributes")
             if (!attributesDir.exists()) {
                 attributesDir.mkdirs()

@@ -530,15 +530,9 @@ class AttributeValidator private constructor() {
     
     private fun extractAttributes(group: AttributeGroup): List<Attribute<*>> {
         return try {
-            // Use reflection or HP JIPP library methods to extract attributes
-            // This is a simplified implementation
-            group.toString()
-                .lines()
-                .mapNotNull { _ ->
-                    // Parse attribute lines - this would need proper implementation
-                    // with the HP JIPP library
-                    null
-                }
+            // AttributeGroup implements Iterable<Attribute<*>>, so we can iterate directly
+            // This is much more reliable than trying to parse string representations
+            group.toList()
         } catch (e: Exception) {
             Log.e(TAG, "Error extracting attributes from group", e)
             emptyList()

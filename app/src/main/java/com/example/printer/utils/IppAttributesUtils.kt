@@ -64,37 +64,18 @@ object IppAttributesUtils {
     
     /**
      * Helper method to get all attributes from a group
+     * 
+     * Since AttributeGroup implements Iterable<Attribute<*>>, we can directly iterate
+     * over the attributes without using reflection. This is more reliable and performant.
      */
     fun getAttributesFromGroup(group: AttributeGroup): List<Attribute<*>> {
-        val result = mutableListOf<Attribute<*>>()
-        // Try reflection path first for native JIPP implementations
-        try {
-            val attributesField = AttributeGroup::class.java.getDeclaredField("attributes")
-            attributesField.isAccessible = true
-            val attributesValue = attributesField.get(group)
-            if (attributesValue is Collection<*>) {
-                for (attr in attributesValue) {
-                    if (attr is Attribute<*>) result.add(attr)
-                }
-            }
+        return try {
+            // AttributeGroup implements Iterable<Attribute<*>>, so we can iterate directly
+            group.toList()
         } catch (e: Exception) {
-            // Many of our AttributeGroup instances are custom (created via createAttributeGroup),
-            // which don't expose a backing "attributes" field. In that case, fall back to using
-            // the public iterator to collect attributes.
-            Log.d(TAG, "Falling back to iterator for AttributeGroup access")
+            Log.e(TAG, "Unable to iterate attributes in AttributeGroup", e)
+            emptyList()
         }
-
-        if (result.isEmpty()) {
-            try {
-                for (attr in group) {
-                    if (attr is Attribute<*>) result.add(attr)
-                }
-            } catch (e: Exception) {
-                Log.e(TAG, "Unable to iterate attributes in AttributeGroup", e)
-            }
-        }
-
-        return result
     }
     
     /**
