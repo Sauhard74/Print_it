@@ -85,6 +85,9 @@ dependencies {
     // Coroutines
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
     
+    // PdfBox for PDF manipulation
+    implementation("com.tom-roush:pdfbox-android:2.0.27.0")
+    
     implementation(libs.core.ktx)
     implementation(kotlin("stdlib", "1.9.22"))
     testImplementation(libs.junit)

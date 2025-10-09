@@ -863,42 +863,315 @@ class ErrorInjectionPlugin : PrinterPlugin {
 }
 
 /**
- * Plugin that modifies documents during processing
+ * Plugin that modifies documents during processing by adding watermarks
  */
 class DocumentModifierPlugin : PrinterPlugin {
     override val id = "document_modifier"
     override val name = "Document Modifier"
     override val version = "1.0.0"
-    override val description = "Modifies documents during processing for testing different scenarios"
+    override val description = "Adds watermarks to documents (PDF and images) for testing and identification"
     override val author = "Built-in"
     
-    private var addWatermark: Boolean = false
-    private var watermarkText: String = "TEST"
+    @Volatile private var addWatermark: Boolean = false
+    @Volatile private var watermarkText: String = "TEST"
+    @Volatile private var watermarkOpacity: Float = 0.3f
+    @Volatile private var watermarkSize: Int = 48
+    @Volatile private var pdfBoxInitialized: Boolean = false
     
-    override suspend fun onLoad(context: Context): Boolean = true
+    override suspend fun onLoad(context: Context): Boolean {
+        // Initialize PdfBox for Android (only once)
+        if (!pdfBoxInitialized) {
+            try {
+                com.tom_roush.pdfbox.android.PDFBoxResourceLoader.init(context)
+                pdfBoxInitialized = true
+                Log.d("DocumentModifierPlugin", "PdfBox initialized successfully")
+            } catch (e: Exception) {
+                Log.e("DocumentModifierPlugin", "Failed to initialize PdfBox", e)
+                return false
+            }
+        }
+        return true
+    }
     
     override suspend fun onUnload(): Boolean = true
     
     override suspend fun processJob(job: PrintJob, documentBytes: ByteArray): JobProcessingResult? {
         if (!addWatermark) return null
         
-        // Simple implementation - in real scenario would modify the document content
-        val modifiedJob = job.copy(
-            metadata = job.metadata + mapOf("watermark" to watermarkText)
-        )
+        return try {
+            // Detect document type
+            val documentType = com.example.printer.utils.DocumentTypeUtils.detectDocumentType(documentBytes)
+            
+            val modifiedBytes = when (documentType) {
+                com.example.printer.utils.DocumentType.PDF -> addWatermarkToPdf(documentBytes)
+                com.example.printer.utils.DocumentType.JPEG,
+                com.example.printer.utils.DocumentType.PNG -> addWatermarkToImage(documentBytes)
+                else -> {
+                    Log.d("DocumentModifierPlugin", "Watermarking not supported for type: $documentType")
+                    null
+                }
+            }
+            
+            if (modifiedBytes != null) {
+                val modifiedJob = job.copy(
+                    metadata = job.metadata + mapOf(
+                        "watermark" to watermarkText,
+                        "watermark_applied" to true
+                    )
+                )
+                
+                JobProcessingResult(
+                    processedBytes = modifiedBytes,
+                    modifiedJob = modifiedJob,
+                    customMetadata = mapOf(
+                        "watermark_added" to true,
+                        "watermark_text" to watermarkText,
+                        "document_type" to documentType.name
+                    )
+                )
+            } else {
+                // Return metadata only if watermarking failed
+                val modifiedJob = job.copy(
+                    metadata = job.metadata + mapOf("watermark_attempted" to true)
+                )
+                JobProcessingResult(
+                    processedBytes = null,
+                    modifiedJob = modifiedJob,
+                    customMetadata = mapOf("watermark_added" to false)
+                )
+            }
+        } catch (e: Exception) {
+            Log.e("DocumentModifierPlugin", "Error adding watermark", e)
+            null
+        }
+    }
+    
+    /**
+     * Add watermark to PDF document using PdfBox
+     */
+    private fun addWatermarkToPdf(pdfBytes: ByteArray): ByteArray? {
+        // Input validation
+        if (pdfBytes.isEmpty()) {
+            Log.e("DocumentModifierPlugin", "PDF bytes are empty")
+            return null
+        }
         
-        return JobProcessingResult(
-            processedBytes = null,
-            modifiedJob = modifiedJob,
-            customMetadata = mapOf("watermark_added" to true)
-        )
+        if (watermarkText.isBlank()) {
+            Log.e("DocumentModifierPlugin", "Watermark text is blank")
+            return null
+        }
+        
+        // Validate configuration ranges
+        val validOpacity = watermarkOpacity.coerceIn(0.1f, 1.0f)
+        val validSize = watermarkSize.coerceIn(12, 144)
+        
+        return try {
+            // Load the PDF document with automatic resource management
+            val inputStream = java.io.ByteArrayInputStream(pdfBytes)
+            val outputStream = java.io.ByteArrayOutputStream()
+            
+            com.tom_roush.pdfbox.pdmodel.PDDocument.load(inputStream).use { document ->
+                // Create content stream for watermark overlay
+                val font = com.tom_roush.pdfbox.pdmodel.font.PDType1Font.HELVETICA_BOLD
+                
+                // Create Extended Graphics State for opacity
+                val graphicsState = com.tom_roush.pdfbox.pdmodel.graphics.state.PDExtendedGraphicsState()
+                graphicsState.nonStrokingAlphaConstant = validOpacity
+                graphicsState.strokingAlphaConstant = validOpacity
+                
+                // Iterate through all pages and add watermark
+                for (page in document.pages) {
+                    // Use try-finally to ensure contentStream is always closed
+                    var contentStream: com.tom_roush.pdfbox.pdmodel.PDPageContentStream? = null
+                    try {
+                        contentStream = com.tom_roush.pdfbox.pdmodel.PDPageContentStream(
+                            document,
+                            page,
+                            com.tom_roush.pdfbox.pdmodel.PDPageContentStream.AppendMode.APPEND,
+                            true,
+                            true
+                        )
+                        
+                        // Get page dimensions
+                        val mediaBox = page.mediaBox
+                        val pageWidth = mediaBox.width
+                        val pageHeight = mediaBox.height
+                        
+                        // Apply graphics state for opacity
+                        contentStream.setGraphicsStateParameters(graphicsState)
+                        
+                        // Set watermark properties
+                        contentStream.beginText()
+                        contentStream.setFont(font, validSize.toFloat())
+                        
+                        // Set color (gray)
+                        contentStream.setNonStrokingColor(
+                            128f / 255f,
+                            128f / 255f, 
+                            128f / 255f
+                        )
+                        
+                        // Calculate center position
+                        val centerX = pageWidth / 2
+                        val centerY = pageHeight / 2
+                        
+                        // Create transformation matrix for rotation and positioning
+                        // 1. Translate to center
+                        // 2. Rotate -45 degrees
+                        // 3. The text will be drawn at the origin of this transformed coordinate system
+                        val matrix = com.tom_roush.pdfbox.util.Matrix()
+                        matrix.translate(centerX, centerY)
+                        matrix.rotate(Math.toRadians(-45.0))
+                        
+                        // Adjust for text centering with proper precision
+                        val textWidth = font.getStringWidth(watermarkText) / 1000.0f * validSize
+                        matrix.translate(-textWidth / 2, 0f)
+                        
+                        contentStream.setTextMatrix(matrix)
+                        
+                        // Draw watermark text
+                        contentStream.showText(watermarkText)
+                        contentStream.endText()
+                    } finally {
+                        // Always close the content stream
+                        contentStream?.close()
+                    }
+                }
+                
+                // Save modified PDF to byte array
+                document.save(outputStream)
+                
+                Log.d("DocumentModifierPlugin", "Successfully watermarked PDF with ${document.numberOfPages} pages")
+            } // document is automatically closed here
+            
+            outputStream.toByteArray()
+        } catch (e: Exception) {
+            Log.e("DocumentModifierPlugin", "Error watermarking PDF", e)
+            null
+        }
+    }
+    
+    /**
+     * Add watermark to image document
+     */
+    private fun addWatermarkToImage(imageBytes: ByteArray): ByteArray? {
+        // Input validation
+        if (imageBytes.isEmpty()) {
+            Log.e("DocumentModifierPlugin", "Image bytes are empty")
+            return null
+        }
+        
+        if (watermarkText.isBlank()) {
+            Log.e("DocumentModifierPlugin", "Watermark text is blank")
+            return null
+        }
+        
+        // Validate configuration ranges
+        val validOpacity = watermarkOpacity.coerceIn(0.1f, 1.0f)
+        val validSize = watermarkSize.coerceIn(12, 144)
+        
+        var originalBitmap: android.graphics.Bitmap? = null
+        var mutableBitmap: android.graphics.Bitmap? = null
+        
+        return try {
+            // Decode the image
+            originalBitmap = android.graphics.BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.size)
+            if (originalBitmap == null) {
+                Log.e("DocumentModifierPlugin", "Failed to decode image")
+                return null
+            }
+            
+            // Create a mutable copy
+            mutableBitmap = originalBitmap.copy(android.graphics.Bitmap.Config.ARGB_8888, true)
+            if (mutableBitmap == null) {
+                Log.e("DocumentModifierPlugin", "Failed to create mutable bitmap copy")
+                return null
+            }
+            
+            val canvas = android.graphics.Canvas(mutableBitmap)
+            
+            // Create watermark paint with validated values
+            val paint = android.graphics.Paint().apply {
+                color = android.graphics.Color.argb((validOpacity * 255).toInt(), 255, 255, 255)
+                textSize = validSize.toFloat()
+                textAlign = android.graphics.Paint.Align.CENTER
+                isAntiAlias = true
+                setShadowLayer(2f, 2f, 2f, android.graphics.Color.BLACK)
+            }
+            
+            // Draw watermark diagonally
+            canvas.save()
+            val centerX = mutableBitmap.width / 2f
+            val centerY = mutableBitmap.height / 2f
+            canvas.rotate(-45f, centerX, centerY)
+            canvas.drawText(watermarkText, centerX, centerY, paint)
+            canvas.restore()
+            
+            // Detect original format and preserve it
+            val outputStream = java.io.ByteArrayOutputStream()
+            val format = when {
+                imageBytes.size >= 2 && 
+                imageBytes[0] == 0xFF.toByte() && 
+                imageBytes[1] == 0xD8.toByte() -> {
+                    // JPEG signature
+                    android.graphics.Bitmap.CompressFormat.JPEG
+                }
+                else -> {
+                    // Default to PNG for PNG and other formats
+                    android.graphics.Bitmap.CompressFormat.PNG
+                }
+            }
+            
+            val quality = if (format == android.graphics.Bitmap.CompressFormat.JPEG) 90 else 100
+            mutableBitmap.compress(format, quality, outputStream)
+            
+            Log.d("DocumentModifierPlugin", "Successfully watermarked image (format: $format)")
+            outputStream.toByteArray()
+        } catch (e: Exception) {
+            Log.e("DocumentModifierPlugin", "Error watermarking image", e)
+            null
+        } finally {
+            // Always clean up bitmaps to prevent memory leaks
+            originalBitmap?.recycle()
+            mutableBitmap?.recycle()
+        }
     }
     
     override fun getConfigurationSchema(): PluginConfigurationSchema {
         return PluginConfigurationSchema(
             fields = listOf(
-                ConfigurationField("add_watermark", "Add watermark", FieldType.BOOLEAN, false),
-                ConfigurationField("watermark_text", "Watermark text", FieldType.TEXT, "TEST")
+                ConfigurationField(
+                    key = "add_watermark",
+                    label = "Enable Watermark",
+                    type = FieldType.BOOLEAN,
+                    defaultValue = false,
+                    description = "Add watermark to PDF and image documents"
+                ),
+                ConfigurationField(
+                    key = "watermark_text",
+                    label = "Watermark Text",
+                    type = FieldType.TEXT,
+                    defaultValue = "TEST",
+                    description = "Text to display as watermark"
+                ),
+                ConfigurationField(
+                    key = "watermark_opacity",
+                    label = "Watermark Opacity",
+                    type = FieldType.NUMBER,
+                    defaultValue = 0.3,
+                    min = 0.1,
+                    max = 1.0,
+                    description = "Opacity of watermark (0.1 = very transparent, 1.0 = solid)"
+                ),
+                ConfigurationField(
+                    key = "watermark_size",
+                    label = "Watermark Size",
+                    type = FieldType.NUMBER,
+                    defaultValue = 48,
+                    min = 12,
+                    max = 144,
+                    description = "Font size of watermark text in points"
+                )
             )
         )
     }
@@ -906,6 +1179,8 @@ class DocumentModifierPlugin : PrinterPlugin {
     override suspend fun updateConfiguration(config: Map<String, Any>): Boolean {
         addWatermark = config["add_watermark"] as? Boolean ?: false
         watermarkText = config["watermark_text"] as? String ?: "TEST"
+        watermarkOpacity = (config["watermark_opacity"] as? Number)?.toFloat() ?: 0.3f
+        watermarkSize = (config["watermark_size"] as? Number)?.toInt() ?: 48
         return true
     }
 }
