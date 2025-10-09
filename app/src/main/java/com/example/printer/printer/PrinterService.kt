@@ -510,15 +510,20 @@ class PrinterService(private val context: Context) {
                         )
                         // Plugin before hooks already executed at operation start
                         
-                        // Save the document with format info
-                        saveDocument(documentData, jobId, documentFormat)
-                        
                         // Execute plugin processing hook (allows delay/modification)
+                        var finalDocumentData = documentData
                         try {
-                            kotlinx.coroutines.runBlocking { pluginFramework.executeJobProcessing(job, documentData) }
+                            val pluginResult = kotlinx.coroutines.runBlocking { pluginFramework.executeJobProcessing(job, documentData) }
+                            if (pluginResult?.processedBytes != null) {
+                                Log.d(TAG, "Plugin modified document: original=${documentData.size} bytes, modified=${pluginResult.processedBytes.size} bytes")
+                                finalDocumentData = pluginResult.processedBytes
+                            }
                         } catch (e: Exception) {
                             Log.w(TAG, "Plugin processJob raised: ${e.message}")
                         }
+                        
+                        // Save the document (possibly modified by plugins) with format info
+                        saveDocument(finalDocumentData, jobId, documentFormat)
                         
                         // Create a success response with job attributes
                         val response = IppPacket(
@@ -633,11 +638,18 @@ class PrinterService(private val context: Context) {
                         )
                         // Plugin before hooks already executed at operation start
                         
-                        saveDocument(documentData, actualJobId, documentFormat)
-                        
+                        // Execute plugin processing hook (allows delay/modification)
+                        var finalDocumentData = documentData
                         try {
-                            kotlinx.coroutines.runBlocking { pluginFramework.executeJobProcessing(job, documentData) }
+                            val pluginResult = kotlinx.coroutines.runBlocking { pluginFramework.executeJobProcessing(job, documentData) }
+                            if (pluginResult?.processedBytes != null) {
+                                Log.d(TAG, "Plugin modified Send-Document: original=${documentData.size} bytes, modified=${pluginResult.processedBytes.size} bytes")
+                                finalDocumentData = pluginResult.processedBytes
+                            }
                         } catch (e: Exception) { Log.w(TAG, "Plugin process hook error: ${e.message}") }
+                        
+                        // Save the document (possibly modified by plugins) with format info
+                        saveDocument(finalDocumentData, actualJobId, documentFormat)
                         
                         // Create a success response with job attributes
                         val response = IppPacket(
