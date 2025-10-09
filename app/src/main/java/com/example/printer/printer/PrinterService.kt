@@ -56,6 +56,14 @@ class PrinterService(private val context: Context) {
     private var simulateErrorMode = false
     private var errorType = "none" // Options: "none", "server-error", "client-error", "aborted", "unsupported-format"
     
+    // Service status tracking
+    enum class ServiceStatus(val displayName: String, val description: String) {
+        STOPPED("Stopped", "Printer service is not running"),
+        STARTING("Starting", "Printer service is initializing"),
+        RUNNING("Running", "Printer service is active and accepting jobs"),
+        ERROR_SIMULATION("Error Mode", "Printer is simulating errors for testing")
+    }
+    
     private val printJobsDirectory: File by lazy {
         File(context.filesDir, "print_jobs").apply {
             if (!exists()) mkdirs()
@@ -112,6 +120,18 @@ class PrinterService(private val context: Context) {
     }
     
     fun getPort(): Int = PORT
+    
+    /**
+     * Get current service status
+     */
+    fun getServiceStatus(): ServiceStatus {
+        return when {
+            simulateErrorMode -> ServiceStatus.ERROR_SIMULATION
+            server == null -> ServiceStatus.STOPPED
+            registrationListener == null -> ServiceStatus.STARTING
+            else -> ServiceStatus.RUNNING
+        }
+    }
     
     /**
      * Configures error simulation
@@ -391,6 +411,26 @@ class PrinterService(private val context: Context) {
         return when (request.code) {
             Operation.printJob.code -> { // Print-Job operation
                 try {
+                    // Execute delay simulator FIRST - before any processing or response
+                    try {
+                        // Create a temporary job for plugin delay processing
+                        val tempJob = com.example.printer.queue.PrintJob(
+                            id = System.currentTimeMillis(),
+                            name = "Temp Job for Delay",
+                            filePath = "temp",
+                            documentFormat = "application/pdf",
+                            size = documentData.size.toLong(),
+                            submissionTime = System.currentTimeMillis(),
+                            state = com.example.printer.queue.PrintJobState.PENDING
+                        )
+                        // Use a new coroutine scope to avoid Compose conflicts
+                        kotlinx.coroutines.runBlocking(kotlinx.coroutines.Dispatchers.IO) { 
+                            pluginFramework.executeBeforeJobProcessing(tempJob)
+                        }
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Plugin delay simulation error: ${e.message}", e)
+                    }
+                    
                     // Respect custom attributes if provided
                     if (!isAcceptingJobsAccordingToCustomAttributes()) {
                         Log.w(TAG, "Rejecting Print-Job: printer-is-accepting-jobs=false from custom attributes")
@@ -468,22 +508,32 @@ class PrinterService(private val context: Context) {
                             impressionsCompleted = 0,
                             metadata = emptyMap()
                         )
-                        // Execute plugin before hooks
-                        try {
-                            kotlinx.coroutines.runBlocking { pluginFramework.executeBeforeJobProcessing(job) }
-                        } catch (e: Exception) {
-                            Log.w(TAG, "Plugin beforeJobProcessing raised: ${e.message}")
-                        }
-                        
-                        // Save the document with format info
-                        saveDocument(documentData, jobId, documentFormat)
+                        // Plugin before hooks already executed at operation start
                         
                         // Execute plugin processing hook (allows delay/modification)
+                        var finalDocumentData = documentData
+                        
+                        // Log original document first bytes for debugging
+                        val originalFirstBytes = documentData.take(16).joinToString(" ") { "%02X".format(it) }
+                        Log.d(TAG, "Original document first 16 bytes: $originalFirstBytes")
+                        
                         try {
-                            kotlinx.coroutines.runBlocking { pluginFramework.executeJobProcessing(job, documentData) }
+                            val pluginResult = kotlinx.coroutines.runBlocking { pluginFramework.executeJobProcessing(job, documentData) }
+                            if (pluginResult?.processedBytes != null) {
+                                Log.d(TAG, "Plugin modified document: original=${documentData.size} bytes, modified=${pluginResult.processedBytes.size} bytes")
+                                // Log first 16 bytes of modified document for debugging
+                                val firstBytes = pluginResult.processedBytes.take(16).joinToString(" ") { "%02X".format(it) }
+                                Log.d(TAG, "Plugin output first 16 bytes: $firstBytes")
+                                finalDocumentData = pluginResult.processedBytes
+                            } else {
+                                Log.d(TAG, "Plugin returned null, using original document")
+                            }
                         } catch (e: Exception) {
-                            Log.w(TAG, "Plugin processJob raised: ${e.message}")
+                            Log.w(TAG, "Plugin processJob raised: ${e.message}", e)
                         }
+                        
+                        // Save the document (possibly modified by plugins) with format info
+                        saveDocument(finalDocumentData, jobId, documentFormat)
                         
                         // Create a success response with job attributes
                         val response = IppPacket(
@@ -518,6 +568,25 @@ class PrinterService(private val context: Context) {
             }
             Operation.sendDocument.code -> { // Send-Document operation
                 try {
+                    // Execute delay simulator FIRST - before any processing or response
+                    try {
+                        val tempJob = com.example.printer.queue.PrintJob(
+                            id = System.currentTimeMillis(),
+                            name = "Temp Job for Send-Document Delay",
+                            filePath = "temp",
+                            documentFormat = "application/pdf",
+                            size = documentData.size.toLong(),
+                            submissionTime = System.currentTimeMillis(),
+                            state = com.example.printer.queue.PrintJobState.PENDING
+                        )
+                        // Use a new coroutine scope to avoid Compose conflicts
+                        kotlinx.coroutines.runBlocking(kotlinx.coroutines.Dispatchers.IO) { 
+                            pluginFramework.executeBeforeJobProcessing(tempJob)
+                        }
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Plugin delay simulation error: ${e.message}", e)
+                    }
+                    
                     if (!isAcceptingJobsAccordingToCustomAttributes()) {
                         Log.w(TAG, "Rejecting Send-Document: printer-is-accepting-jobs=false from custom attributes")
                         return IppPacket(Status.serverErrorServiceUnavailable, request.requestId)
@@ -577,15 +646,20 @@ class PrinterService(private val context: Context) {
                             impressionsCompleted = 0,
                             metadata = emptyMap()
                         )
-                        try {
-                            kotlinx.coroutines.runBlocking { pluginFramework.executeBeforeJobProcessing(job) }
-                        } catch (e: Exception) { Log.w(TAG, "Plugin before hook error: ${e.message}") }
+                        // Plugin before hooks already executed at operation start
                         
-                        saveDocument(documentData, actualJobId, documentFormat)
-                        
+                        // Execute plugin processing hook (allows delay/modification)
+                        var finalDocumentData = documentData
                         try {
-                            kotlinx.coroutines.runBlocking { pluginFramework.executeJobProcessing(job, documentData) }
+                            val pluginResult = kotlinx.coroutines.runBlocking { pluginFramework.executeJobProcessing(job, documentData) }
+                            if (pluginResult?.processedBytes != null) {
+                                Log.d(TAG, "Plugin modified Send-Document: original=${documentData.size} bytes, modified=${pluginResult.processedBytes.size} bytes")
+                                finalDocumentData = pluginResult.processedBytes
+                            }
                         } catch (e: Exception) { Log.w(TAG, "Plugin process hook error: ${e.message}") }
+                        
+                        // Save the document (possibly modified by plugins) with format info
+                        saveDocument(finalDocumentData, actualJobId, documentFormat)
                         
                         // Create a success response with job attributes
                         val response = IppPacket(
@@ -1212,39 +1286,34 @@ class PrinterService(private val context: Context) {
     }
     
     /**
-     * Saves extracted document content
+     * Saves extracted document content with automatic decompression
      */
     private fun saveExtractedDocument(content: ByteArray, jobId: Long, originalFormat: String) {
         try {
-            // Determine the actual format based on content
-            val actualFormat = detectDocumentFormat(content)
-            val extension = when (actualFormat) {
-                "PDF" -> ".pdf"
-                "JPEG" -> ".jpg"
-                "PNG" -> ".png"
-                "PostScript" -> ".ps"
-                "EMF" -> ".emf"
-                "ZIP" -> ".zip"
-                "TEXT" -> ".txt"
-                "HTML" -> ".html"
-                else -> ".bin"
-            }
+            // Log first 16 bytes of original content for debugging
+            val originalFirstBytes = content.take(16).joinToString(" ") { "%02X".format(it) }
+            Log.d(TAG, "Original content first 16 bytes: $originalFirstBytes")
             
-            val filename = "print_job_${jobId}${extension}"
+            // Try decompression and detect format
+            val (documentType, actualBytes) = com.example.printer.utils.DocumentTypeUtils.detectDocumentTypeWithDecompression(content)
+            
+            // Generate filename with correct extension
+            val filename = com.example.printer.utils.DocumentTypeUtils.generateFilename(jobId, documentType)
             val file = File(printJobsDirectory, filename)
             
-            Log.d(TAG, "Saving extracted $actualFormat document (${content.size} bytes) to: ${file.absolutePath}")
+            Log.d(TAG, "Saving ${documentType.name} document (${actualBytes.size} bytes) to: ${file.absolutePath}")
             
-            FileOutputStream(file).use { it.write(content) }
+            // Save the (possibly decompressed) document
+            FileOutputStream(file).use { it.write(actualBytes) }
             
             if (file.exists() && file.length() > 0) {
                 // Notify that a new job was received
                 val intent = android.content.Intent("com.example.printer.NEW_PRINT_JOB")
                 intent.putExtra("job_path", file.absolutePath)
-                intent.putExtra("job_size", content.size)
+                intent.putExtra("job_size", actualBytes.size)
                 intent.putExtra("job_id", jobId)
-                intent.putExtra("document_format", "application/${actualFormat.lowercase()}")
-                intent.putExtra("detected_format", actualFormat.lowercase())
+                intent.putExtra("document_format", documentType.mimeType)
+                intent.putExtra("detected_format", documentType.extension)
                 Log.d(TAG, "Broadcasting extracted document notification: ${intent.action}")
                 context.sendBroadcast(intent)
             }
@@ -1254,79 +1323,202 @@ class PrinterService(private val context: Context) {
         }
     }
     
+    
+    // Plugin Management Methods
+    
     /**
-     * Detects document format from content
+     * Load a plugin by ID
      */
-    private fun detectDocumentFormat(content: ByteArray): String {
-        if (content.size < 4) {
-            Log.d(TAG, "Content too small for format detection: ${content.size} bytes")
-            return "UNKNOWN"
+    suspend fun loadPlugin(pluginId: String): Boolean {
+        return try {
+            val result = pluginFramework.loadPlugin(pluginId)
+            if (result) {
+                logger.i(LogCategory.SYSTEM, TAG, "Plugin loaded: $pluginId")
+            } else {
+                logger.e(LogCategory.SYSTEM, TAG, "Failed to load plugin: $pluginId")
+            }
+            result
+        } catch (e: Exception) {
+            logger.e(LogCategory.SYSTEM, TAG, "Error loading plugin: $pluginId", e)
+            false
         }
-        
-        // Log first few bytes for debugging
-        val firstBytes = content.take(16).joinToString(" ") { "%02X".format(it) }
-        Log.d(TAG, "Format detection - First 16 bytes: $firstBytes")
-        
-        // Check for PDF
-        if (content[0] == '%'.toByte() && content[1] == 'P'.toByte() && 
-            content[2] == 'D'.toByte() && content[3] == 'F'.toByte()) {
-            Log.d(TAG, "Detected PDF format")
-            return "PDF"
+    }
+    
+    /**
+     * Unload a plugin by ID
+     */
+    suspend fun unloadPlugin(pluginId: String): Boolean {
+        return try {
+            val result = pluginFramework.unloadPlugin(pluginId)
+            if (result) {
+                logger.i(LogCategory.SYSTEM, TAG, "Plugin unloaded: $pluginId")
+            } else {
+                logger.e(LogCategory.SYSTEM, TAG, "Failed to unload plugin: $pluginId")
+            }
+            result
+        } catch (e: Exception) {
+            logger.e(LogCategory.SYSTEM, TAG, "Error unloading plugin: $pluginId", e)
+            false
         }
-        
-        // Check for JPEG
-        if (content.size >= 3 && content[0] == 0xFF.toByte() && content[1] == 0xD8.toByte() && content[2] == 0xFF.toByte()) {
-            Log.d(TAG, "Detected JPEG format")
-            return "JPEG"
+    }
+    
+    /**
+     * Update plugin configuration
+     */
+    suspend fun updatePluginConfiguration(pluginId: String, config: Map<String, Any>): Boolean {
+        return try {
+            val result = pluginFramework.updatePluginConfiguration(pluginId, config)
+            if (result) {
+                logger.i(LogCategory.SYSTEM, TAG, "Plugin configuration updated: $pluginId")
+            } else {
+                logger.e(LogCategory.SYSTEM, TAG, "Failed to update plugin configuration: $pluginId")
+            }
+            result
+        } catch (e: Exception) {
+            logger.e(LogCategory.SYSTEM, TAG, "Error updating plugin configuration: $pluginId", e)
+            false
         }
-        
-        // Check for PNG
-        if (content.size >= 8 && content[0] == 0x89.toByte() && content[1] == 0x50.toByte() && 
-            content[2] == 0x4E.toByte() && content[3] == 0x47.toByte()) {
-            Log.d(TAG, "Detected PNG format")
-            return "PNG"
+    }
+    
+    /**
+     * Get plugin configuration
+     */
+    fun getPluginConfiguration(pluginId: String): Map<String, Any>? {
+        return pluginFramework.getPluginConfiguration(pluginId)
+    }
+    
+    /**
+     * Test error injection plugin with multiple sample jobs
+     */
+    suspend fun testErrorInjectionPlugin(): String {
+        return try {
+            // Load the error injection plugin if not already loaded
+            val loaded = loadPlugin("error_injection")
+            if (!loaded) {
+                return "Failed to load error injection plugin"
+            }
+            
+            val results = mutableListOf<String>()
+            var successCount = 0
+            var errorCount = 0
+            val totalAttempts = 10
+            
+            repeat(totalAttempts) { attempt ->
+                try {
+                    // Create a test job
+                    val currentTime = System.currentTimeMillis()
+                    val testJob = PrintJob(
+                        id = currentTime + attempt,
+                        name = "Error Test Job #${attempt + 1}",
+                        filePath = "test_error.pdf",
+                        documentFormat = "application/pdf",
+                        size = 1024L,
+                        submissionTime = currentTime,
+                        state = PrintJobState.PENDING,
+                        metadata = mapOf("test" to true, "attempt" to attempt + 1)
+                    )
+                    
+                    // Try to process the job - error injection happens in beforeJobProcessing
+                    val continueProcessing = pluginFramework.executeBeforeJobProcessing(testJob)
+                    
+                    if (continueProcessing) {
+                        // Get metadata about the plugin
+                        val result = pluginFramework.executeJobProcessing(testJob, byteArrayOf())
+                        val lastError = result?.customMetadata?.get("last_injected_error") as? String ?: "none"
+                        
+                        successCount++
+                        results.add("✅ Job #${attempt + 1}: Success (last error: $lastError)")
+                    }
+                    
+                } catch (e: Exception) {
+                    errorCount++
+                    val errorType = when (e) {
+                        is java.net.ConnectException -> "Network"
+                        is IllegalArgumentException -> "Format"
+                        is SecurityException -> "Authorization"
+                        is IllegalStateException -> "Queue"
+                        else -> when {
+                            e.message?.contains("Memory Error") == true -> "Memory"
+                            else -> "Runtime"
+                        }
+                    }
+                    results.add("❌ Job #${attempt + 1}: $errorType Error - ${e.message}")
+                }
+            }
+            
+            val summary = "Error Injection Test Results:\n" +
+                    "Total attempts: $totalAttempts\n" +
+                    "Successful: $successCount\n" +
+                    "Errors injected: $errorCount\n" +
+                    "Error rate: ${(errorCount.toFloat() / totalAttempts * 100).toInt()}%\n\n" +
+                    "Details:\n" + results.joinToString("\n")
+            
+            logger.i(LogCategory.SYSTEM, TAG, "Error injection test completed", 
+                metadata = mapOf<String, Any>(
+                    "total_attempts" to totalAttempts,
+                    "successful_jobs" to successCount,
+                    "injected_errors" to errorCount,
+                    "error_rate_percent" to (errorCount.toFloat() / totalAttempts * 100).toInt()
+                )
+            )
+            
+            summary
+            
+        } catch (e: Exception) {
+            logger.e(LogCategory.SYSTEM, TAG, "Error testing error injection plugin", e)
+            "Error testing error injection: ${e.message}"
         }
-        
-        // Check for EMF (Windows Enhanced Metafile)
-        if (content.size >= 4 && content[0] == 0x24.toByte() && content[1] == 0x00.toByte() &&
-            content[2] == 0x00.toByte() && content[3] == 0x00.toByte()) {
-            Log.d(TAG, "Detected EMF format")
-            return "EMF"
+    }
+    
+    /**
+     * Test delay simulator plugin with a sample job
+     */
+    suspend fun testDelaySimulatorPlugin(): String {
+        return try {
+            // Load the delay simulator plugin if not already loaded
+            val loaded = loadPlugin("delay_simulator")
+            if (!loaded) {
+                return "Failed to load delay simulator plugin"
+            }
+            
+            // Create a test job
+            val currentTime = System.currentTimeMillis()
+            val testJob = PrintJob(
+                id = currentTime,
+                name = "Delay Test Job",
+                filePath = "test.pdf",
+                documentFormat = "application/pdf",
+                size = 1024L,
+                submissionTime = currentTime,
+                state = PrintJobState.PENDING,
+                metadata = mapOf("test" to true)
+            )
+            
+            val startTime = System.currentTimeMillis()
+            
+            // Execute the plugin before processing (where delay happens)
+            val continueProcessing = pluginFramework.executeBeforeJobProcessing(testJob)
+            
+            val endTime = System.currentTimeMillis()
+            val actualDelay = endTime - startTime
+            
+            // Also get metadata from processJob for expected delay info
+            val result = pluginFramework.executeJobProcessing(testJob, byteArrayOf())
+            val expectedDelay = result?.customMetadata?.get("simulated_delay_ms") as? Number
+            
+            logger.i(LogCategory.SYSTEM, TAG, "Delay simulator test completed", 
+                metadata = mapOf<String, Any>(
+                    "actual_delay_ms" to actualDelay,
+                    "expected_delay_ms" to (expectedDelay ?: 0),
+                    "test_job_id" to testJob.id
+                )
+            )
+            
+            "Delay simulator test completed! Actual delay: ${actualDelay}ms, Expected: ${expectedDelay}ms"
+            
+        } catch (e: Exception) {
+            logger.e(LogCategory.SYSTEM, TAG, "Error testing delay simulator plugin", e)
+            "Error testing delay simulator: ${e.message}"
         }
-        
-        // Check for PostScript
-        if (content[0] == '%'.toByte() && content[1] == '!'.toByte() && 
-            content[2] == 'P'.toByte() && content[3] == 'S'.toByte()) {
-            Log.d(TAG, "Detected PostScript format")
-            return "PostScript"
-        }
-        
-        // Check for ZIP (Office documents, etc.)
-        if (content.size >= 4 && content[0] == 0x50.toByte() && content[1] == 0x4B.toByte() && 
-            content[2] == 0x03.toByte() && content[3] == 0x04.toByte()) {
-            Log.d(TAG, "Detected ZIP format (possible Office document)")
-            return "ZIP"
-        }
-        
-        // Check for plain text
-        val printableCount = content.take(minOf(100, content.size)).count { byte ->
-            (byte >= 0x20.toByte() && byte <= 0x7E.toByte()) || 
-            byte == 0x09.toByte() || byte == 0x0A.toByte() || byte == 0x0D.toByte()
-        }
-        val printableRatio = printableCount.toDouble() / minOf(100, content.size)
-        if (printableRatio > 0.8) {
-            Log.d(TAG, "Detected plain text format (printable ratio: $printableRatio)")
-            return "TEXT"
-        }
-        
-        // Check for HTML
-        val headerString = String(content, 0, minOf(100, content.size)).lowercase()
-        if (headerString.contains("<html") || headerString.contains("<!doctype html")) {
-            Log.d(TAG, "Detected HTML format")
-            return "HTML"
-        }
-        
-        Log.w(TAG, "Could not detect format. Printable ratio: $printableRatio")
-        return "UNKNOWN"
     }
 } 
