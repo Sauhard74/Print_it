@@ -33,7 +33,44 @@ object DocumentTypeUtils {
     private const val TAG = "DocumentTypeUtils"
     
     /**
-     * Detect the actual document type from binary data
+     * Detect the actual document type from binary data with automatic decompression
+     * @param bytes The raw bytes to analyze
+     * @param attemptDecompression If true, tries to decompress data before detection
+     * @return Pair of (DocumentType, actualBytes) where actualBytes might be decompressed
+     */
+    fun detectDocumentTypeWithDecompression(bytes: ByteArray, attemptDecompression: Boolean = true): Pair<DocumentType, ByteArray> {
+        if (bytes.isEmpty()) return Pair(DocumentType.UNKNOWN, bytes)
+        
+        var dataToAnalyze = bytes
+        
+        // Try decompression first if enabled
+        if (attemptDecompression) {
+            val compressionInfo = CompressionUtils.getCompressionInfo(bytes)
+            Log.d(TAG, "Compression check: $compressionInfo")
+            
+            val decompressionResult = CompressionUtils.decompress(bytes)
+            if (decompressionResult.success && decompressionResult.decompressedData != null) {
+                Log.d(TAG, "Decompression successful: ${decompressionResult.compressionType} " +
+                          "(${decompressionResult.originalSize} → ${decompressionResult.decompressedSize} bytes)")
+                dataToAnalyze = decompressionResult.decompressedData
+                
+                // Log first 16 bytes after decompression for debugging
+                val firstBytes = dataToAnalyze.take(16).joinToString(" ") { "%02X".format(it) }
+                Log.d(TAG, "Decompressed data first 16 bytes: $firstBytes")
+            } else if (!decompressionResult.success && decompressionResult.compressionType != CompressionUtils.CompressionType.NONE) {
+                Log.w(TAG, "Decompression failed: ${decompressionResult.errorMessage}")
+            }
+        }
+        
+        // Detect the actual document type from (possibly decompressed) data
+        val documentType = detectDocumentType(dataToAnalyze)
+        Log.d(TAG, "Detected document type: $documentType")
+        
+        return Pair(documentType, dataToAnalyze)
+    }
+    
+    /**
+     * Detect the actual document type from binary data (without decompression)
      * Consolidated logic from DocumentProcessor.detectDocumentType()
      */
     fun detectDocumentType(bytes: ByteArray): DocumentType {

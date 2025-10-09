@@ -512,14 +512,24 @@ class PrinterService(private val context: Context) {
                         
                         // Execute plugin processing hook (allows delay/modification)
                         var finalDocumentData = documentData
+                        
+                        // Log original document first bytes for debugging
+                        val originalFirstBytes = documentData.take(16).joinToString(" ") { "%02X".format(it) }
+                        Log.d(TAG, "Original document first 16 bytes: $originalFirstBytes")
+                        
                         try {
                             val pluginResult = kotlinx.coroutines.runBlocking { pluginFramework.executeJobProcessing(job, documentData) }
                             if (pluginResult?.processedBytes != null) {
                                 Log.d(TAG, "Plugin modified document: original=${documentData.size} bytes, modified=${pluginResult.processedBytes.size} bytes")
+                                // Log first 16 bytes of modified document for debugging
+                                val firstBytes = pluginResult.processedBytes.take(16).joinToString(" ") { "%02X".format(it) }
+                                Log.d(TAG, "Plugin output first 16 bytes: $firstBytes")
                                 finalDocumentData = pluginResult.processedBytes
+                            } else {
+                                Log.d(TAG, "Plugin returned null, using original document")
                             }
                         } catch (e: Exception) {
-                            Log.w(TAG, "Plugin processJob raised: ${e.message}")
+                            Log.w(TAG, "Plugin processJob raised: ${e.message}", e)
                         }
                         
                         // Save the document (possibly modified by plugins) with format info
@@ -1276,39 +1286,34 @@ class PrinterService(private val context: Context) {
     }
     
     /**
-     * Saves extracted document content
+     * Saves extracted document content with automatic decompression
      */
     private fun saveExtractedDocument(content: ByteArray, jobId: Long, originalFormat: String) {
         try {
-            // Determine the actual format based on content
-            val actualFormat = detectDocumentFormat(content)
-            val extension = when (actualFormat) {
-                "PDF" -> ".pdf"
-                "JPEG" -> ".jpg"
-                "PNG" -> ".png"
-                "PostScript" -> ".ps"
-                "EMF" -> ".emf"
-                "ZIP" -> ".zip"
-                "TEXT" -> ".txt"
-                "HTML" -> ".html"
-                else -> ".bin"
-            }
+            // Log first 16 bytes of original content for debugging
+            val originalFirstBytes = content.take(16).joinToString(" ") { "%02X".format(it) }
+            Log.d(TAG, "Original content first 16 bytes: $originalFirstBytes")
             
-            val filename = "print_job_${jobId}${extension}"
+            // Try decompression and detect format
+            val (documentType, actualBytes) = com.example.printer.utils.DocumentTypeUtils.detectDocumentTypeWithDecompression(content)
+            
+            // Generate filename with correct extension
+            val filename = com.example.printer.utils.DocumentTypeUtils.generateFilename(jobId, documentType)
             val file = File(printJobsDirectory, filename)
             
-            Log.d(TAG, "Saving extracted $actualFormat document (${content.size} bytes) to: ${file.absolutePath}")
+            Log.d(TAG, "Saving ${documentType.name} document (${actualBytes.size} bytes) to: ${file.absolutePath}")
             
-            FileOutputStream(file).use { it.write(content) }
+            // Save the (possibly decompressed) document
+            FileOutputStream(file).use { it.write(actualBytes) }
             
             if (file.exists() && file.length() > 0) {
                 // Notify that a new job was received
                 val intent = android.content.Intent("com.example.printer.NEW_PRINT_JOB")
                 intent.putExtra("job_path", file.absolutePath)
-                intent.putExtra("job_size", content.size)
+                intent.putExtra("job_size", actualBytes.size)
                 intent.putExtra("job_id", jobId)
-                intent.putExtra("document_format", "application/${actualFormat.lowercase()}")
-                intent.putExtra("detected_format", actualFormat.lowercase())
+                intent.putExtra("document_format", documentType.mimeType)
+                intent.putExtra("detected_format", documentType.extension)
                 Log.d(TAG, "Broadcasting extracted document notification: ${intent.action}")
                 context.sendBroadcast(intent)
             }
@@ -1318,81 +1323,6 @@ class PrinterService(private val context: Context) {
         }
     }
     
-    /**
-     * Detects document format from content
-     */
-    private fun detectDocumentFormat(content: ByteArray): String {
-        if (content.size < 4) {
-            Log.d(TAG, "Content too small for format detection: ${content.size} bytes")
-            return "UNKNOWN"
-        }
-        
-        // Log first few bytes for debugging
-        val firstBytes = content.take(16).joinToString(" ") { "%02X".format(it) }
-        Log.d(TAG, "Format detection - First 16 bytes: $firstBytes")
-        
-        // Check for PDF
-        if (content[0] == '%'.toByte() && content[1] == 'P'.toByte() && 
-            content[2] == 'D'.toByte() && content[3] == 'F'.toByte()) {
-            Log.d(TAG, "Detected PDF format")
-            return "PDF"
-        }
-        
-        // Check for JPEG
-        if (content.size >= 3 && content[0] == 0xFF.toByte() && content[1] == 0xD8.toByte() && content[2] == 0xFF.toByte()) {
-            Log.d(TAG, "Detected JPEG format")
-            return "JPEG"
-        }
-        
-        // Check for PNG
-        if (content.size >= 8 && content[0] == 0x89.toByte() && content[1] == 0x50.toByte() && 
-            content[2] == 0x4E.toByte() && content[3] == 0x47.toByte()) {
-            Log.d(TAG, "Detected PNG format")
-            return "PNG"
-        }
-        
-        // Check for EMF (Windows Enhanced Metafile)
-        if (content.size >= 4 && content[0] == 0x24.toByte() && content[1] == 0x00.toByte() &&
-            content[2] == 0x00.toByte() && content[3] == 0x00.toByte()) {
-            Log.d(TAG, "Detected EMF format")
-            return "EMF"
-        }
-        
-        // Check for PostScript
-        if (content[0] == '%'.toByte() && content[1] == '!'.toByte() && 
-            content[2] == 'P'.toByte() && content[3] == 'S'.toByte()) {
-            Log.d(TAG, "Detected PostScript format")
-            return "PostScript"
-        }
-        
-        // Check for ZIP (Office documents, etc.)
-        if (content.size >= 4 && content[0] == 0x50.toByte() && content[1] == 0x4B.toByte() && 
-            content[2] == 0x03.toByte() && content[3] == 0x04.toByte()) {
-            Log.d(TAG, "Detected ZIP format (possible Office document)")
-            return "ZIP"
-        }
-        
-        // Check for plain text
-        val printableCount = content.take(minOf(100, content.size)).count { byte ->
-            (byte >= 0x20.toByte() && byte <= 0x7E.toByte()) || 
-            byte == 0x09.toByte() || byte == 0x0A.toByte() || byte == 0x0D.toByte()
-        }
-        val printableRatio = printableCount.toDouble() / minOf(100, content.size)
-        if (printableRatio > 0.8) {
-            Log.d(TAG, "Detected plain text format (printable ratio: $printableRatio)")
-            return "TEXT"
-        }
-        
-        // Check for HTML
-        val headerString = String(content, 0, minOf(100, content.size)).lowercase()
-        if (headerString.contains("<html") || headerString.contains("<!doctype html")) {
-            Log.d(TAG, "Detected HTML format")
-            return "HTML"
-        }
-        
-        Log.w(TAG, "Could not detect format. Printable ratio: $printableRatio")
-        return "UNKNOWN"
-    }
     
     // Plugin Management Methods
     
