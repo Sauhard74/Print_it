@@ -11,6 +11,8 @@ import android.os.ParcelFileDescriptor
 import android.util.Log
 import com.example.printer.queue.PrintJob
 import com.example.printer.queue.PrintJobQueue
+import com.example.printer.utils.DocumentType
+import com.example.printer.utils.DocumentTypeUtils
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.ByteArrayOutputStream
@@ -32,29 +34,6 @@ data class DocumentProcessingResult(
     val thumbnailPath: String? = null,
     val errorMessage: String? = null
 )
-
-/**
- * Document types supported by the processor
- */
-enum class DocumentType(val extension: String, val mimeType: String) {
-    PDF("pdf", "application/pdf"),
-    JPEG("jpg", "image/jpeg"),
-    PNG("png", "image/png"),
-    POSTSCRIPT("ps", "application/postscript"),
-    RAW("raw", "application/octet-stream"),
-    TEXT("txt", "text/plain"),
-    UNKNOWN("data", "application/octet-stream");
-    
-    companion object {
-        fun fromMimeType(mimeType: String): DocumentType {
-            return values().find { it.mimeType == mimeType } ?: UNKNOWN
-        }
-        
-        fun fromExtension(extension: String): DocumentType {
-            return values().find { it.extension.equals(extension, ignoreCase = true) } ?: UNKNOWN
-        }
-    }
-}
 
 /**
  * Document metadata extracted during processing
@@ -111,12 +90,12 @@ class DocumentProcessor private constructor(private val context: Context) {
         Log.d(TAG, "Processing document for job $jobId, format: $documentFormat, size: ${documentBytes.size} bytes")
         
         try {
-            // Detect actual document type
-            val detectedType = detectDocumentType(documentBytes)
+            // Detect actual document type using consolidated utility
+            val detectedType = DocumentTypeUtils.detectDocumentType(documentBytes)
             Log.d(TAG, "Detected document type: $detectedType")
             
-            // Extract document data if it's embedded in IPP data
-            val (cleanDocumentBytes, actualStartIndex) = extractDocumentData(documentBytes, detectedType)
+            // Extract document data if it's embedded in IPP data using consolidated utility
+            val (cleanDocumentBytes, actualStartIndex) = DocumentTypeUtils.extractDocumentData(documentBytes, detectedType)
             
             // Generate file paths
             val printJobsDir = File(context.filesDir, "print_jobs")
@@ -124,7 +103,7 @@ class DocumentProcessor private constructor(private val context: Context) {
                 printJobsDir.mkdirs()
             }
             
-            val filename = generateFilename(jobId, detectedType)
+            val filename = DocumentTypeUtils.generateFilename(jobId, detectedType)
             val documentFile = File(printJobsDir, filename)
             val thumbnailFile = File(printJobsDir, "thumb_$filename.png")
             
@@ -191,98 +170,6 @@ class DocumentProcessor private constructor(private val context: Context) {
                 errorMessage = e.message
             )
         }
-    }
-    
-    /**
-     * Detect the actual document type from binary data
-     */
-    private fun detectDocumentType(bytes: ByteArray): DocumentType {
-        if (bytes.isEmpty()) return DocumentType.UNKNOWN
-        
-        // Check for PDF signature
-        if (bytes.size >= 4) {
-            val pdfSignature = byteArrayOf('%'.toByte(), 'P'.toByte(), 'D'.toByte(), 'F'.toByte())
-            for (i in 0..minOf(bytes.size - 4, 1024)) {
-                if (bytes.sliceArray(i until i + 4).contentEquals(pdfSignature)) {
-                    return DocumentType.PDF
-                }
-            }
-        }
-        
-        // Check for JPEG signature
-        if (bytes.size >= 2 && bytes[0] == 0xFF.toByte() && bytes[1] == 0xD8.toByte()) {
-            return DocumentType.JPEG
-        }
-        
-        // Check for PNG signature
-        if (bytes.size >= 8) {
-            val pngSignature = byteArrayOf(0x89.toByte(), 'P'.toByte(), 'N'.toByte(), 'G'.toByte(), 
-                                          0x0D, 0x0A, 0x1A, 0x0A)
-            if (bytes.sliceArray(0 until 8).contentEquals(pngSignature)) {
-                return DocumentType.PNG
-            }
-        }
-        
-        // Check for PostScript signature
-        if (bytes.size >= 2 && bytes[0] == '%'.toByte() && bytes[1] == '!'.toByte()) {
-            return DocumentType.POSTSCRIPT
-        }
-        
-        // Check if it's text (simple heuristic)
-        val textBytes = bytes.take(1024)
-        val printableCount = textBytes.count { byte ->
-            val char = byte.toInt()
-            char in 32..126 || char in arrayOf(9, 10, 13) // printable ASCII + tab, LF, CR
-        }
-        
-        if (printableCount > textBytes.size * 0.8) {
-            return DocumentType.TEXT
-        }
-        
-        return DocumentType.UNKNOWN
-    }
-    
-    /**
-     * Extract clean document data from IPP wrapper
-     */
-    private fun extractDocumentData(bytes: ByteArray, type: DocumentType): Pair<ByteArray, Int> {
-        when (type) {
-            DocumentType.PDF -> {
-                // Find PDF start
-                for (i in 0 until bytes.size - 4) {
-                    if (bytes[i] == '%'.toByte() && 
-                        bytes[i + 1] == 'P'.toByte() && 
-                        bytes[i + 2] == 'D'.toByte() && 
-                        bytes[i + 3] == 'F'.toByte()) {
-                        return Pair(bytes.sliceArray(i until bytes.size), i)
-                    }
-                }
-            }
-            DocumentType.JPEG -> {
-                // Find JPEG start
-                for (i in 0 until bytes.size - 2) {
-                    if (bytes[i] == 0xFF.toByte() && bytes[i + 1] == 0xD8.toByte()) {
-                        return Pair(bytes.sliceArray(i until bytes.size), i)
-                    }
-                }
-            }
-            DocumentType.PNG -> {
-                // Find PNG start
-                val pngSignature = byteArrayOf(0x89.toByte(), 'P'.toByte(), 'N'.toByte(), 'G'.toByte())
-                for (i in 0 until bytes.size - 4) {
-                    if (bytes.sliceArray(i until i + 4).contentEquals(pngSignature)) {
-                        return Pair(bytes.sliceArray(i until bytes.size), i)
-                    }
-                }
-            }
-            else -> {
-                // For other types, return as-is
-                return Pair(bytes, 0)
-            }
-        }
-        
-        // If no specific format found, return original
-        return Pair(bytes, 0)
     }
     
     /**
@@ -433,9 +320,10 @@ class DocumentProcessor private constructor(private val context: Context) {
      * Generate PDF thumbnail (simplified - would need proper PDF library in production)
      */
     private fun generatePdfThumbnail(bytes: ByteArray): Bitmap? {
+        var tempFile: File? = null
         try {
             // Create a temporary file for PDF rendering
-            val tempFile = File.createTempFile("pdf_temp", ".pdf", context.cacheDir)
+            tempFile = File.createTempFile("pdf_temp", ".pdf", context.cacheDir)
             tempFile.writeBytes(bytes)
             
             ParcelFileDescriptor.open(tempFile, ParcelFileDescriptor.MODE_READ_ONLY)?.use { fd ->
@@ -453,10 +341,15 @@ class DocumentProcessor private constructor(private val context: Context) {
                     }
                 }
             }
-            
-            tempFile.delete()
         } catch (e: Exception) {
             Log.e(TAG, "Error generating PDF thumbnail", e)
+        } finally {
+            // Always clean up temp file, even if early return happens
+            tempFile?.let { file ->
+                if (file.exists()) {
+                    file.delete()
+                }
+            }
         }
         
         return null
@@ -523,14 +416,6 @@ class DocumentProcessor private constructor(private val context: Context) {
     }
     
     /**
-     * Generate appropriate filename for the document
-     */
-    private fun generateFilename(jobId: Long, type: DocumentType): String {
-        val timestamp = System.currentTimeMillis()
-        return "job_${jobId}_${timestamp}.${type.extension}"
-    }
-    
-    /**
      * Get document preview information
      */
     suspend fun getDocumentPreview(filePath: String): DocumentPreview? = withContext(Dispatchers.IO) {
@@ -539,7 +424,7 @@ class DocumentProcessor private constructor(private val context: Context) {
             if (!file.exists()) return@withContext null
             
             val bytes = file.readBytes()
-            val type = detectDocumentType(bytes)
+            val type = DocumentTypeUtils.detectDocumentType(bytes)
             val metadata = extractDocumentMetadata(bytes, type, emptyMap())
             
             DocumentPreview(
