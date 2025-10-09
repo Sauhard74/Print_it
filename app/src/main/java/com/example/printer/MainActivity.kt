@@ -201,7 +201,8 @@ fun MainNavigation(printerService: PrinterService) {
                     onBackClick = { currentScreen = "main" }
                 )
                 "plugins" -> com.example.printer.ui.PluginManagementScreen(
-                    onBackClick = { currentScreen = "main" }
+                    onBackClick = { currentScreen = "main" },
+                    printerService = printerService
                 )
             }
         }
