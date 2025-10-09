@@ -63,6 +63,16 @@ class MainActivity : ComponentActivity() {
         // Initialize the printer service
         printerService = PrinterService(this)
         
+        // Start the printer service (tied to Activity lifecycle, not composable)
+        printerService.startPrinterService(
+            onSuccess = {
+                Log.d("MainActivity", "Printer service started successfully")
+            },
+            onError = { error ->
+                Log.e("MainActivity", "Failed to start printer service: $error")
+            }
+        )
+        
         // Register the broadcast receiver
         registerReceiver(
             printJobReceiver, 
@@ -235,26 +245,24 @@ fun PrinterApp(
             delay(1000) // 1 second refresh interval
         }
     }
-
-    DisposableEffect(printerService) {
-        isServiceRunning = true
-        statusMessage = "Starting printer service..."
-        
-        printerService.startPrinterService(
-            onSuccess = {
-                statusMessage = "Printer service running\nPrinter name: ${printerService.getPrinterName()}"
-                refreshSavedFiles()
-            },
-            onError = { error ->
-                statusMessage = "Error: $error"
-                isServiceRunning = false
+    
+    // Update UI based on actual service status (service lifecycle managed by MainActivity)
+    LaunchedEffect(Unit) {
+        while (true) {
+            val status = printerService.getServiceStatus()
+            isServiceRunning = status == PrinterService.ServiceStatus.RUNNING || 
+                               status == PrinterService.ServiceStatus.ERROR_SIMULATION
+            statusMessage = when (status) {
+                PrinterService.ServiceStatus.RUNNING -> 
+                    "Printer service running\nPrinter name: ${printerService.getPrinterName()}"
+                PrinterService.ServiceStatus.STARTING -> 
+                    "Starting printer service..."
+                PrinterService.ServiceStatus.ERROR_SIMULATION -> 
+                    "Printer service running (Error Mode)\nPrinter name: ${printerService.getPrinterName()}"
+                PrinterService.ServiceStatus.STOPPED -> 
+                    "Printer service not running"
             }
-        )
-        
-        onDispose {
-            if (isServiceRunning) {
-                printerService.stopPrinterService()
-            }
+            delay(500) // Poll status every 0.5 seconds
         }
     }
     
