@@ -12,11 +12,16 @@ import io.ktor.server.response.*
 import io.ktor.server.routing.*
 import io.ktor.http.*
 import java.io.File
+import com.hp.jipp.encoding.IntOrIntRange
 import com.hp.jipp.encoding.IppPacket
 import com.hp.jipp.encoding.IppInputStream
 import com.hp.jipp.encoding.IppOutputStream
+import com.hp.jipp.encoding.Resolution
+import com.hp.jipp.encoding.ResolutionUnit
 import com.hp.jipp.encoding.Tag
 import com.hp.jipp.encoding.AttributeGroup
+import com.hp.jipp.model.MediaCol
+import com.hp.jipp.model.MediaColDatabase
 import com.hp.jipp.model.Operation
 import com.hp.jipp.model.Status
 import com.hp.jipp.model.Types
@@ -37,6 +42,7 @@ import com.example.printer.logging.LogLevel
 import java.io.FileOutputStream
 import com.example.printer.plugins.PluginFramework
 import com.example.printer.queue.PrintJob
+import com.example.printer.queue.PrintJobQueue
 import com.example.printer.queue.PrintJobState
 
 class PrinterService(private val context: Context) {
@@ -737,6 +743,28 @@ class PrinterService(private val context: Context) {
                 } catch (_: Exception) {}
                 baseResponse
             }
+            Operation.cancelJob.code -> { // Cancel-Job operation
+                try {
+                    val jobId = request.attributeGroups
+                        .find { it.tag == Tag.operationAttributes }
+                        ?.getValues(Types.jobId)
+                        ?.firstOrNull() as? Int
+
+                    if (jobId == null) {
+                        IppPacket(Status.clientErrorBadRequest, request.requestId)
+                    } else {
+                        val queue = PrintJobQueue.getInstance(context)
+                        if (queue.cancelJob(jobId.toLong())) {
+                            IppPacket(Status.successfulOk, request.requestId)
+                        } else {
+                            IppPacket(Status.clientErrorNotFound, request.requestId)
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error processing Cancel-Job request", e)
+                    IppPacket(Status.serverErrorInternalError, request.requestId)
+                }
+            }
             else -> {
                 // For any unhandled operations, return a positive response
                 IppPacket(Status.successfulOk, request.requestId)
@@ -864,7 +892,45 @@ class PrinterService(private val context: Context) {
                 "na_letter_8.5x11in", 
                 "na_legal_8.5x14in"
             ),
-            
+            Types.mediaTypeSupported.of("stationery", "photographic"),
+            Types.mediaSourceSupported.of("auto", "main"),
+            Types.mediaColDatabase.of(
+              listOf<MediaColDatabase>(
+                // A4
+                MediaColDatabase(
+                  mediaSize = MediaColDatabase.MediaSize(IntOrIntRange(21000), IntOrIntRange(29700)),
+                  mediaBottomMargin = 0,
+                  mediaTopMargin = 0,
+                  mediaLeftMargin = 0,
+                  mediaRightMargin = 0,
+                ),
+                // A5
+                MediaColDatabase(
+                  mediaSize = MediaColDatabase.MediaSize(IntOrIntRange(14800), IntOrIntRange(21000)),
+                  mediaBottomMargin = 0,
+                  mediaTopMargin = 0,
+                  mediaLeftMargin = 0,
+                  mediaRightMargin = 0,
+                ),
+                // Letter
+                MediaColDatabase(
+                  mediaSize = MediaColDatabase.MediaSize(IntOrIntRange(21590), IntOrIntRange(27940)),
+                  mediaBottomMargin = 0,
+                  mediaTopMargin = 0,
+                  mediaLeftMargin = 0,
+                  mediaRightMargin = 0,
+                ),
+                // Legal
+                MediaColDatabase(
+                  mediaSize = MediaColDatabase.MediaSize(IntOrIntRange(21590), IntOrIntRange(35560)),
+                  mediaBottomMargin = 0,
+                  mediaTopMargin = 0,
+                  mediaLeftMargin = 0,
+                  mediaRightMargin = 0,
+                ),
+              )
+            ),
+
             // Job attributes
             Types.jobSheetsDefault.of("none"),
             Types.jobSheetsSupported.of("none", "standard"),
@@ -874,13 +940,15 @@ class PrinterService(private val context: Context) {
                 Operation.printJob.code,
                 Operation.validateJob.code,
                 Operation.createJob.code,
+                Operation.cancelJob.code,
                 Operation.getPrinterAttributes.code,
                 Operation.getJobAttributes.code,
                 Operation.sendDocument.code
             ),
             
             // Capabilities
-            Types.colorSupported.of(true)
+            Types.colorSupported.of(true),
+            Types.printerResolutionSupported.of(Resolution(300, 300, ResolutionUnit.dotsPerInch))
         )
         
         // Create the response packet with operation attributes and printer attributes
