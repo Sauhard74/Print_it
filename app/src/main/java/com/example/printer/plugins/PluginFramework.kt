@@ -1,6 +1,11 @@
 package com.example.printer.plugins
 
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.Paint
 import android.util.Log
 import com.example.printer.logging.LogCategory
 import com.example.printer.logging.LogLevel
@@ -8,10 +13,18 @@ import com.example.printer.logging.PrinterLogger
 import com.example.printer.queue.PrintJob
 import com.example.printer.queue.PrintJobState
 import com.hp.jipp.encoding.AttributeGroup
+import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
+import com.tom_roush.pdfbox.pdmodel.PDDocument
+import com.tom_roush.pdfbox.pdmodel.PDPageContentStream
+import com.tom_roush.pdfbox.pdmodel.font.PDType1Font
+import com.tom_roush.pdfbox.pdmodel.graphics.state.PDExtendedGraphicsState
+import com.tom_roush.pdfbox.util.Matrix
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import org.json.JSONObject
+import java.io.ByteArrayInputStream
+import java.io.ByteArrayOutputStream
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 
@@ -882,7 +895,7 @@ class DocumentModifierPlugin : PrinterPlugin {
         // Initialize PdfBox for Android (only once)
         if (!pdfBoxInitialized) {
             try {
-                com.tom_roush.pdfbox.android.PDFBoxResourceLoader.init(context)
+                PDFBoxResourceLoader.init(context)
                 pdfBoxInitialized = true
                 Log.d("DocumentModifierPlugin", "PdfBox initialized successfully")
             } catch (e: Exception) {
@@ -967,27 +980,27 @@ class DocumentModifierPlugin : PrinterPlugin {
         
         return try {
             // Load the PDF document with automatic resource management
-            val inputStream = java.io.ByteArrayInputStream(pdfBytes)
-            val outputStream = java.io.ByteArrayOutputStream()
+            val inputStream = ByteArrayInputStream(pdfBytes)
+            val outputStream = ByteArrayOutputStream()
             
-            com.tom_roush.pdfbox.pdmodel.PDDocument.load(inputStream).use { document ->
+            PDDocument.load(inputStream).use { document ->
                 // Create content stream for watermark overlay
-                val font = com.tom_roush.pdfbox.pdmodel.font.PDType1Font.HELVETICA_BOLD
+                val font = PDType1Font.HELVETICA_BOLD
                 
                 // Create Extended Graphics State for opacity
-                val graphicsState = com.tom_roush.pdfbox.pdmodel.graphics.state.PDExtendedGraphicsState()
+                val graphicsState = PDExtendedGraphicsState()
                 graphicsState.nonStrokingAlphaConstant = validOpacity
                 graphicsState.strokingAlphaConstant = validOpacity
                 
                 // Iterate through all pages and add watermark
                 for (page in document.pages) {
                     // Use try-finally to ensure contentStream is always closed
-                    var contentStream: com.tom_roush.pdfbox.pdmodel.PDPageContentStream? = null
+                    var contentStream: PDPageContentStream? = null
                     try {
-                        contentStream = com.tom_roush.pdfbox.pdmodel.PDPageContentStream(
+                        contentStream = PDPageContentStream(
                             document,
                             page,
-                            com.tom_roush.pdfbox.pdmodel.PDPageContentStream.AppendMode.APPEND,
+                            PDPageContentStream.AppendMode.APPEND,
                             true,
                             true
                         )
@@ -1019,7 +1032,7 @@ class DocumentModifierPlugin : PrinterPlugin {
                         // 1. Translate to center
                         // 2. Rotate -45 degrees
                         // 3. The text will be drawn at the origin of this transformed coordinate system
-                        val matrix = com.tom_roush.pdfbox.util.Matrix()
+                        val matrix = Matrix()
                         matrix.translate(centerX, centerY)
                         matrix.rotate(Math.toRadians(-45.0))
                         
@@ -1070,33 +1083,33 @@ class DocumentModifierPlugin : PrinterPlugin {
         val validOpacity = watermarkOpacity.coerceIn(0.1f, 1.0f)
         val validSize = watermarkSize.coerceIn(12, 144)
         
-        var originalBitmap: android.graphics.Bitmap? = null
-        var mutableBitmap: android.graphics.Bitmap? = null
+        var originalBitmap: Bitmap? = null
+        var mutableBitmap: Bitmap? = null
         
         return try {
             // Decode the image
-            originalBitmap = android.graphics.BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.size)
+            originalBitmap = BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.size)
             if (originalBitmap == null) {
                 Log.e("DocumentModifierPlugin", "Failed to decode image")
                 return null
             }
             
             // Create a mutable copy
-            mutableBitmap = originalBitmap.copy(android.graphics.Bitmap.Config.ARGB_8888, true)
+            mutableBitmap = originalBitmap.copy(Bitmap.Config.ARGB_8888, true)
             if (mutableBitmap == null) {
                 Log.e("DocumentModifierPlugin", "Failed to create mutable bitmap copy")
                 return null
             }
             
-            val canvas = android.graphics.Canvas(mutableBitmap)
+            val canvas = Canvas(mutableBitmap)
             
             // Create watermark paint with validated values
-            val paint = android.graphics.Paint().apply {
-                color = android.graphics.Color.argb((validOpacity * 255).toInt(), 255, 255, 255)
+            val paint = Paint().apply {
+                color = Color.argb((validOpacity * 255).toInt(), 255, 255, 255)
                 textSize = validSize.toFloat()
-                textAlign = android.graphics.Paint.Align.CENTER
+                textAlign = Paint.Align.CENTER
                 isAntiAlias = true
-                setShadowLayer(2f, 2f, 2f, android.graphics.Color.BLACK)
+                setShadowLayer(2f, 2f, 2f, Color.BLACK)
             }
             
             // Draw watermark diagonally
@@ -1108,21 +1121,21 @@ class DocumentModifierPlugin : PrinterPlugin {
             canvas.restore()
             
             // Detect original format and preserve it
-            val outputStream = java.io.ByteArrayOutputStream()
+            val outputStream = ByteArrayOutputStream()
             val format = when {
                 imageBytes.size >= 2 && 
                 imageBytes[0] == 0xFF.toByte() && 
                 imageBytes[1] == 0xD8.toByte() -> {
                     // JPEG signature
-                    android.graphics.Bitmap.CompressFormat.JPEG
+                    Bitmap.CompressFormat.JPEG
                 }
                 else -> {
                     // Default to PNG for PNG and other formats
-                    android.graphics.Bitmap.CompressFormat.PNG
+                    Bitmap.CompressFormat.PNG
                 }
             }
             
-            val quality = if (format == android.graphics.Bitmap.CompressFormat.JPEG) 90 else 100
+            val quality = if (format == Bitmap.CompressFormat.JPEG) 90 else 100
             mutableBitmap.compress(format, quality, outputStream)
             
             Log.d("DocumentModifierPlugin", "Successfully watermarked image (format: $format)")
