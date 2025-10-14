@@ -1270,6 +1270,16 @@ class AttributeOverridePlugin : PrinterPlugin {
 
 /**
  * Plugin that enhances logging
+ * 
+ * This plugin provides advanced logging capabilities for debugging and monitoring:
+ * - File-based logging with automatic rotation
+ * - Performance metrics tracking (job processing time, throughput)
+ * - Detailed job information logging
+ * - Configurable log levels
+ * - Log file management and export
+ * 
+ * Log files are stored in the app's cache directory and automatically rotated
+ * when they exceed 10MB to prevent excessive storage usage.
  */
 class LoggingEnhancerPlugin : PrinterPlugin {
     override val id = "logging_enhancer"
@@ -1278,26 +1288,125 @@ class LoggingEnhancerPlugin : PrinterPlugin {
     override val description = "Adds enhanced logging capabilities for debugging"
     override val author = "Built-in"
     
-    private var logLevel: String = "DEBUG"
-    private var logToFile: Boolean = true
-    private var logJobDetails: Boolean = true
-    private var logPerformance: Boolean = false
+    @Volatile private var logLevel: String = "DEBUG"
+    @Volatile private var logToFile: Boolean = true
+    @Volatile private var logJobDetails: Boolean = true
+    @Volatile private var logPerformance: Boolean = false
     
-    override suspend fun onLoad(context: Context): Boolean = true
+    private var logFile: java.io.File? = null
+    private var logWriter: java.io.BufferedWriter? = null
+    private val logLock = Any()
     
-    override suspend fun onUnload(): Boolean = true
+    // Performance tracking
+    private val jobStartTimes = mutableMapOf<Long, Long>()
+    private val performanceStats = mutableMapOf<String, MutableList<Long>>()
+    
+    companion object {
+        private const val TAG = "LoggingEnhancerPlugin"
+        private const val MAX_LOG_FILE_SIZE = 10 * 1024 * 1024 // 10MB
+        private const val LOG_FILE_NAME = "printer_enhanced_log.txt"
+    }
+    
+    override suspend fun onLoad(context: Context): Boolean {
+        if (logToFile) {
+            initializeLogFile(context)
+        }
+        writeLog("INFO", "Enhanced Logging Plugin loaded - file logging: $logToFile, performance: $logPerformance")
+        return true
+    }
+    
+    override suspend fun onUnload(): Boolean {
+        writeLog("INFO", "Enhanced Logging Plugin unloading")
+        closeLogFile()
+        return true
+    }
     
     override suspend fun beforeJobProcessing(job: PrintJob): Boolean {
+        val timestamp = System.currentTimeMillis()
+        
         if (logJobDetails) {
-            Log.d("EnhancedLogging", "Processing job: ${job.id} - ${job.name}")
+            val message = buildString {
+                append("▶ Job Started: ${job.id}")
+                append("\n  Name: ${job.name}")
+                append("\n  Status: ${job.status}")
+                append("\n  Pages: ${job.totalPages}")
+                append("\n  Copies: ${job.copies}")
+                append("\n  Format: ${job.documentFormat}")
+                append("\n  Created: ${java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.US).format(java.util.Date(job.createdAt))}")
+                if (job.metadata.isNotEmpty()) {
+                    append("\n  Metadata: ${job.metadata}")
+                }
+            }
+            writeLog("INFO", message)
         }
+        
+        if (logPerformance) {
+            synchronized(jobStartTimes) {
+                jobStartTimes[job.id] = timestamp
+            }
+            writeLog("DEBUG", "Performance tracking started for job ${job.id}")
+        }
+        
         return true
     }
     
     override suspend fun afterJobProcessing(job: PrintJob, success: Boolean) {
         if (logJobDetails) {
-            Log.d("EnhancedLogging", "Completed job: ${job.id} - Success: $success")
+            val statusIcon = if (success) "✓" else "✗"
+            val message = buildString {
+                append("$statusIcon Job ${if (success) "Completed" else "Failed"}: ${job.id}")
+                append("\n  Name: ${job.name}")
+                append("\n  Status: ${job.status}")
+                append("\n  Success: $success")
+            }
+            writeLog(if (success) "INFO" else "ERROR", message)
         }
+        
+        if (logPerformance) {
+            val startTime = synchronized(jobStartTimes) {
+                jobStartTimes.remove(job.id)
+            }
+            
+            if (startTime != null) {
+                val duration = System.currentTimeMillis() - startTime
+                val durationSeconds = duration / 1000.0
+                
+                // Track statistics
+                synchronized(performanceStats) {
+                    performanceStats.getOrPut("processing_times") { mutableListOf() }.add(duration)
+                }
+                
+                writeLog("INFO", "⏱ Performance Metrics for job ${job.id}:")
+                writeLog("INFO", "  Processing time: ${durationSeconds}s (${duration}ms)")
+                writeLog("INFO", "  Document size: ${job.documentBytes?.size ?: 0} bytes")
+                
+                if (job.documentBytes != null && job.documentBytes!!.isNotEmpty()) {
+                    val throughput = job.documentBytes!!.size / durationSeconds
+                    writeLog("INFO", "  Throughput: ${formatBytes(throughput.toLong())}/s")
+                }
+                
+                // Log aggregate statistics every 10 jobs
+                val processingTimes = synchronized(performanceStats) {
+                    performanceStats["processing_times"]?.toList() ?: emptyList()
+                }
+                
+                if (processingTimes.size % 10 == 0 && processingTimes.isNotEmpty()) {
+                    val avgTime = processingTimes.average()
+                    val minTime = processingTimes.minOrNull() ?: 0
+                    val maxTime = processingTimes.maxOrNull() ?: 0
+                    
+                    writeLog("INFO", "📊 Aggregate Performance Statistics (last ${processingTimes.size} jobs):")
+                    writeLog("INFO", "  Average: ${avgTime / 1000.0}s")
+                    writeLog("INFO", "  Min: ${minTime / 1000.0}s")
+                    writeLog("INFO", "  Max: ${maxTime / 1000.0}s")
+                }
+            }
+        }
+    }
+    
+    override suspend fun processJob(job: PrintJob, documentBytes: ByteArray): JobProcessingResult? {
+        // This plugin doesn't modify jobs, just logs them
+        return null
     }
     
     override fun getConfigurationSchema(): PluginConfigurationSchema {
@@ -1316,7 +1425,7 @@ class LoggingEnhancerPlugin : PrinterPlugin {
                     label = "Log to File",
                     type = FieldType.BOOLEAN,
                     defaultValue = true,
-                    description = "Save logs to file for later analysis"
+                    description = "Save logs to file for later analysis (stored in app cache)"
                 ),
                 ConfigurationField(
                     key = "log_job_details",
@@ -1330,17 +1439,143 @@ class LoggingEnhancerPlugin : PrinterPlugin {
                     label = "Log Performance Metrics",
                     type = FieldType.BOOLEAN,
                     defaultValue = false,
-                    description = "Log performance timing information"
+                    description = "Log performance timing, throughput, and statistics"
                 )
             )
         )
     }
     
     override suspend fun updateConfiguration(config: Map<String, Any>): Boolean {
+        val oldLogToFile = logToFile
+        
         logLevel = config["log_level"] as? String ?: "DEBUG"
         logToFile = config["log_to_file"] as? Boolean ?: true
         logJobDetails = config["log_job_details"] as? Boolean ?: true
         logPerformance = config["log_performance"] as? Boolean ?: false
+        
+        // Reinitialize log file if setting changed
+        if (logToFile != oldLogToFile) {
+            if (logToFile) {
+                // Will be initialized on next write
+                writeLog("INFO", "File logging enabled")
+            } else {
+                writeLog("INFO", "File logging disabled")
+                closeLogFile()
+            }
+        }
+        
+        writeLog("DEBUG", "Configuration updated: level=$logLevel, toFile=$logToFile, jobDetails=$logJobDetails, performance=$logPerformance")
+        
         return true
+    }
+    
+    /**
+     * Initialize log file in app's cache directory
+     */
+    private fun initializeLogFile(context: Context) {
+        try {
+            synchronized(logLock) {
+                // Close existing file if open
+                logWriter?.close()
+                
+                // Create log file in cache directory
+                val cacheDir = context.cacheDir
+                logFile = java.io.File(cacheDir, LOG_FILE_NAME)
+                
+                // Check if rotation is needed
+                if (logFile!!.exists() && logFile!!.length() > MAX_LOG_FILE_SIZE) {
+                    rotateLogFile()
+                }
+                
+                // Open writer in append mode
+                logWriter = java.io.BufferedWriter(
+                    java.io.FileWriter(logFile, true)
+                )
+                
+                Log.d(TAG, "Log file initialized: ${logFile!!.absolutePath}")
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to initialize log file", e)
+            logWriter = null
+            logFile = null
+        }
+    }
+    
+    /**
+     * Rotate log file when it gets too large
+     */
+    private fun rotateLogFile() {
+        try {
+            val oldFile = java.io.File(logFile!!.parent, "$LOG_FILE_NAME.old")
+            if (oldFile.exists()) {
+                oldFile.delete()
+            }
+            logFile!!.renameTo(oldFile)
+            Log.d(TAG, "Log file rotated")
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to rotate log file", e)
+        }
+    }
+    
+    /**
+     * Write log entry to both Android log and file
+     */
+    private fun writeLog(level: String, message: String) {
+        // Write to Android log
+        when (level) {
+            "VERBOSE" -> Log.v(TAG, message)
+            "DEBUG" -> Log.d(TAG, message)
+            "INFO" -> Log.i(TAG, message)
+            "WARN" -> Log.w(TAG, message)
+            "ERROR" -> Log.e(TAG, message)
+        }
+        
+        // Write to file if enabled
+        if (logToFile) {
+            try {
+                synchronized(logLock) {
+                    val timestamp = java.text.SimpleDateFormat(
+                        "yyyy-MM-dd HH:mm:ss.SSS",
+                        java.util.Locale.US
+                    ).format(java.util.Date())
+                    
+                    val logEntry = "[$timestamp] [$level] $message\n"
+                    
+                    logWriter?.write(logEntry)
+                    logWriter?.flush()
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to write to log file", e)
+            }
+        }
+    }
+    
+    /**
+     * Close log file writer
+     */
+    private fun closeLogFile() {
+        try {
+            synchronized(logLock) {
+                logWriter?.flush()
+                logWriter?.close()
+                logWriter = null
+                logFile = null
+            }
+            Log.d(TAG, "Log file closed")
+        } catch (e: Exception) {
+            Log.e(TAG, "Error closing log file", e)
+        }
+    }
+    
+    /**
+     * Format bytes to human-readable string
+     */
+    private fun formatBytes(bytes: Long): String {
+        return when {
+            bytes < 1024 -> "$bytes B"
+            bytes < 1024 * 1024 -> String.format("%.2f KB", bytes / 1024.0)
+            bytes < 1024 * 1024 * 1024 -> String.format("%.2f MB", bytes / (1024.0 * 1024.0))
+            else -> String.format("%.2f GB", bytes / (1024.0 * 1024.0 * 1024.0))
+        }
     }
 }
