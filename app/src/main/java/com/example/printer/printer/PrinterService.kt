@@ -724,18 +724,44 @@ class PrinterService(private val context: Context) {
                 }
             }
             Operation.getPrinterAttributes.code -> { // Get-Printer-Attributes operation
-                // This provides information about printer capabilities
-                val baseResponse = createPrinterAttributesResponse(request)
-                // Allow plugins to customize attributes
-                try {
-                    val customized = kotlinx.coroutines.runBlocking { pluginFramework.executeIppAttributeCustomization(baseResponse.attributeGroups.toList()) }
-                    return IppPacket(
-                        baseResponse.status,
-                        baseResponse.requestId,
-                        *customized.toTypedArray()
+                // Priority order: 1) Default 2) Custom Attributes 3) Plugins (highest priority)
+                
+                // Step 1: Get default attributes
+                val defaultResponse = createDefaultPrinterAttributesResponse(request)
+                
+                // Step 2: Apply custom attributes if set (overrides defaults)
+                val withCustomAttributes = if (customIppAttributes != null) {
+                    Log.d(TAG, "Applying custom IPP attributes (priority 2)")
+                    IppPacket(
+                        Status.successfulOk,
+                        request.requestId,
+                        AttributeGroup.groupOf(
+                            Tag.operationAttributes,
+                            Types.attributesCharset.of("utf-8"),
+                            Types.attributesNaturalLanguage.of("en")
+                        ),
+                        *customIppAttributes!!.toTypedArray()
                     )
-                } catch (_: Exception) {}
-                baseResponse
+                } else {
+                    defaultResponse
+                }
+                
+                // Step 3: Allow plugins to customize attributes (highest priority, overrides everything)
+                try {
+                    val pluginCustomized = kotlinx.coroutines.runBlocking { 
+                        pluginFramework.executeIppAttributeCustomization(withCustomAttributes.attributeGroups.toList()) 
+                    }
+                    Log.d(TAG, "Applied plugin attribute customization (priority 3 - highest)")
+                    return IppPacket(
+                        withCustomAttributes.status,
+                        withCustomAttributes.requestId,
+                        *pluginCustomized.toTypedArray()
+                    )
+                } catch (e: Exception) {
+                    Log.w(TAG, "Plugin customization failed, using custom/default attributes", e)
+                }
+                
+                withCustomAttributes
             }
             else -> {
                 // For any unhandled operations, return a positive response
@@ -744,54 +770,12 @@ class PrinterService(private val context: Context) {
         }
     }
     
-    private fun createPrinterAttributesResponse(request: IppPacket): IppPacket {
-        // If custom attributes are set, use them
-        if (customIppAttributes != null) {
-            Log.d(TAG, "Using custom IPP attributes for printer response")
-            logger.d(LogCategory.IPP_PROTOCOL, TAG, "Using custom IPP attributes", metadata = mapOf(
-                "groups" to customIppAttributes!!.size,
-                "total_attributes" to customIppAttributes!!.sumOf { group ->
-                    try {
-                        // Count attributes in each group safely
-                        var count = 0
-                        val iterator = group.iterator()
-                        while (iterator.hasNext()) {
-                            iterator.next()
-                            count++
-                        }
-                        count
-                    } catch (e: Exception) {
-                        Log.w(TAG, "Error counting attributes in group", e)
-                        0
-                    }
-                }
-            ))
-            
-            // Log specific attributes being applied
-            customIppAttributes!!.forEach { group ->
-                try {
-                    Log.d(TAG, "Custom attribute group: ${group.tag}")
-                    val iterator = group.iterator()
-                    while (iterator.hasNext()) {
-                        val attr = iterator.next()
-                        Log.d(TAG, "  - ${attr.name}: ${attr.getValue()}")
-                    }
-                } catch (e: Exception) {
-                    Log.w(TAG, "Error logging attribute group", e)
-                }
-            }
-            
-            return IppPacket(
-                Status.successfulOk,
-                request.requestId,
-                AttributeGroup.groupOf(
-                    Tag.operationAttributes,
-                    Types.attributesCharset.of("utf-8"),
-                    Types.attributesNaturalLanguage.of("en")
-                ),
-                *customIppAttributes!!.toTypedArray()
-            )
-        }
+    /**
+     * Create default printer attributes response
+     * Priority: Lowest (can be overridden by custom attributes and plugins)
+     */
+    private fun createDefaultPrinterAttributesResponse(request: IppPacket): IppPacket {
+        Log.d(TAG, "Creating default IPP attributes (priority 1 - lowest)")
         
         // Get the IP address of the device
         val hostAddress = getLocalIpAddress() ?: "127.0.0.1"
