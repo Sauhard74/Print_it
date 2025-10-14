@@ -1313,8 +1313,23 @@ class AttributeOverridePlugin : PrinterPlugin {
                         }
                         "media-supported" -> {
                             if (mediaSizes.isNotEmpty()) {
-                                modifiedAttributes.add(com.hp.jipp.model.Types.mediaSupported.of(*mediaSizes.toTypedArray()))
-                                Log.d("AttributeOverridePlugin", "Override: media-supported = ${mediaSizes.joinToString()}")
+                                // mediaSupported.of expects vararg String parameters
+                                // Convert List<String> to vararg array
+                                val mediaArray = mediaSizes.toTypedArray()
+                                val mediaAttr = when {
+                                    mediaArray.size == 1 -> com.hp.jipp.model.Types.mediaSupported.of(mediaArray[0])
+                                    mediaArray.size >= 2 -> {
+                                        val rest = mediaArray.copyOfRange(1, mediaArray.size)
+                                        com.hp.jipp.model.Types.mediaSupported.of(mediaArray[0], *rest)
+                                    }
+                                    else -> attr  // fallback to original
+                                }
+                                if (mediaArray.isNotEmpty()) {
+                                    modifiedAttributes.add(mediaAttr)
+                                    Log.d("AttributeOverridePlugin", "Override: media-supported = ${mediaSizes.joinToString()}")
+                                } else {
+                                    modifiedAttributes.add(attr)
+                                }
                             } else {
                                 modifiedAttributes.add(attr)
                             }
@@ -1536,11 +1551,11 @@ class LoggingEnhancerPlugin : PrinterPlugin {
             val message = buildString {
                 append("▶ Job Started: ${job.id}")
                 append("\n  Name: ${job.name}")
-                append("\n  Status: ${job.status}")
-                append("\n  Pages: ${job.totalPages}")
-                append("\n  Copies: ${job.copies}")
+                append("\n  State: ${job.state}")
                 append("\n  Format: ${job.documentFormat}")
-                append("\n  Created: ${java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.US).format(java.util.Date(job.createdAt))}")
+                append("\n  Size: ${formatBytes(job.size)}")
+                append("\n  Submitted: ${java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.US).format(java.util.Date(job.submissionTime))}")
+                append("\n  User: ${job.jobOriginatingUserName}")
                 if (job.metadata.isNotEmpty()) {
                     append("\n  Metadata: ${job.metadata}")
                 }
@@ -1564,7 +1579,7 @@ class LoggingEnhancerPlugin : PrinterPlugin {
             val message = buildString {
                 append("$statusIcon Job ${if (success) "Completed" else "Failed"}: ${job.id}")
                 append("\n  Name: ${job.name}")
-                append("\n  Status: ${job.status}")
+                append("\n  State: ${job.state}")
                 append("\n  Success: $success")
             }
             writeLog(if (success) "INFO" else "ERROR", message)
@@ -1586,10 +1601,10 @@ class LoggingEnhancerPlugin : PrinterPlugin {
                 
                 writeLog("INFO", "⏱ Performance Metrics for job ${job.id}:")
                 writeLog("INFO", "  Processing time: ${durationSeconds}s (${duration}ms)")
-                writeLog("INFO", "  Document size: ${job.documentBytes?.size ?: 0} bytes")
+                writeLog("INFO", "  Document size: ${formatBytes(job.size)}")
                 
-                if (job.documentBytes != null && job.documentBytes!!.isNotEmpty()) {
-                    val throughput = job.documentBytes!!.size / durationSeconds
+                if (job.size > 0) {
+                    val throughput = job.size / durationSeconds
                     writeLog("INFO", "  Throughput: ${formatBytes(throughput.toLong())}/s")
                 }
                 
