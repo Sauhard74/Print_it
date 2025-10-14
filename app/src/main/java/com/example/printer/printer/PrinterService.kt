@@ -403,7 +403,7 @@ class PrinterService(private val context: Context) {
         }
     }
     
-    private fun processNormalRequest(
+    private suspend fun processNormalRequest(
         request: IppPacket,
         documentData: ByteArray,
         call: ApplicationCall
@@ -423,10 +423,12 @@ class PrinterService(private val context: Context) {
                             submissionTime = System.currentTimeMillis(),
                             state = com.example.printer.queue.PrintJobState.PENDING
                         )
-                        // Use a new coroutine scope to avoid Compose conflicts
-                        kotlinx.coroutines.runBlocking(kotlinx.coroutines.Dispatchers.IO) { 
+                        // Direct suspend call with timeout (already in Ktor coroutine context)
+                        kotlinx.coroutines.withTimeout(30000) { // 30 second timeout
                             pluginFramework.executeBeforeJobProcessing(tempJob)
                         }
+                    } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
+                        Log.w(TAG, "Plugin beforeJobProcessing timeout after 30s")
                     } catch (e: Exception) {
                         Log.w(TAG, "Plugin delay simulation error: ${e.message}", e)
                     }
@@ -518,7 +520,9 @@ class PrinterService(private val context: Context) {
                         Log.d(TAG, "Original document first 16 bytes: $originalFirstBytes")
                         
                         try {
-                            val pluginResult = kotlinx.coroutines.runBlocking { pluginFramework.executeJobProcessing(job, documentData) }
+                            val pluginResult = kotlinx.coroutines.withTimeout(60000) { // 60 second timeout for document processing
+                                pluginFramework.executeJobProcessing(job, documentData)
+                            }
                             if (pluginResult?.processedBytes != null) {
                                 Log.d(TAG, "Plugin modified document: original=${documentData.size} bytes, modified=${pluginResult.processedBytes.size} bytes")
                                 // Log first 16 bytes of modified document for debugging
@@ -528,6 +532,8 @@ class PrinterService(private val context: Context) {
                             } else {
                                 Log.d(TAG, "Plugin returned null, using original document")
                             }
+                        } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
+                            Log.w(TAG, "Plugin processing timeout after 60s - using original document")
                         } catch (e: Exception) {
                             Log.w(TAG, "Plugin processJob raised: ${e.message}", e)
                         }
@@ -579,10 +585,12 @@ class PrinterService(private val context: Context) {
                             submissionTime = System.currentTimeMillis(),
                             state = com.example.printer.queue.PrintJobState.PENDING
                         )
-                        // Use a new coroutine scope to avoid Compose conflicts
-                        kotlinx.coroutines.runBlocking(kotlinx.coroutines.Dispatchers.IO) { 
+                        // Direct suspend call with timeout (already in Ktor coroutine context)
+                        kotlinx.coroutines.withTimeout(30000) { // 30 second timeout
                             pluginFramework.executeBeforeJobProcessing(tempJob)
                         }
+                    } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
+                        Log.w(TAG, "Plugin beforeJobProcessing timeout after 30s")
                     } catch (e: Exception) {
                         Log.w(TAG, "Plugin delay simulation error: ${e.message}", e)
                     }
@@ -651,11 +659,15 @@ class PrinterService(private val context: Context) {
                         // Execute plugin processing hook (allows delay/modification)
                         var finalDocumentData = documentData
                         try {
-                            val pluginResult = kotlinx.coroutines.runBlocking { pluginFramework.executeJobProcessing(job, documentData) }
+                            val pluginResult = kotlinx.coroutines.withTimeout(60000) { // 60 second timeout for document processing
+                                pluginFramework.executeJobProcessing(job, documentData)
+                            }
                             if (pluginResult?.processedBytes != null) {
                                 Log.d(TAG, "Plugin modified Send-Document: original=${documentData.size} bytes, modified=${pluginResult.processedBytes.size} bytes")
                                 finalDocumentData = pluginResult.processedBytes
                             }
+                        } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
+                            Log.w(TAG, "Plugin processing timeout after 60s - using original document")
                         } catch (e: Exception) { Log.w(TAG, "Plugin process hook error: ${e.message}") }
                         
                         // Save the document (possibly modified by plugins) with format info
@@ -748,7 +760,7 @@ class PrinterService(private val context: Context) {
                 
                 // Step 3: Allow plugins to customize attributes (highest priority, overrides everything)
                 try {
-                    val pluginCustomized = kotlinx.coroutines.runBlocking { 
+                    val pluginCustomized = kotlinx.coroutines.withTimeout(10000) { // 10 second timeout for attribute customization
                         pluginFramework.executeIppAttributeCustomization(withCustomAttributes.attributeGroups.toList()) 
                     }
                     Log.d(TAG, "Applied plugin attribute customization (priority 3 - highest)")
@@ -757,6 +769,8 @@ class PrinterService(private val context: Context) {
                         withCustomAttributes.requestId,
                         *pluginCustomized.toTypedArray()
                     )
+                } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
+                    Log.w(TAG, "Plugin attribute customization timeout after 10s - using custom/default attributes")
                 } catch (e: Exception) {
                     Log.w(TAG, "Plugin customization failed, using custom/default attributes", e)
                 }

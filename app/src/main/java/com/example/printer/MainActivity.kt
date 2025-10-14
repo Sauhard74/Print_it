@@ -3,6 +3,7 @@ package com.example.printer
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.viewModels
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -16,6 +17,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.lifecycleScope
 import com.example.printer.printer.PrinterService
 import com.example.printer.settings.SettingsScreen
 import com.example.printer.ui.theme.PrinterTheme
@@ -25,10 +27,13 @@ import com.example.printer.utils.DocumentDiagnostics
 import com.example.printer.utils.PreferenceUtils
 import android.util.Log
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import java.io.File
 
 class MainActivity : ComponentActivity() {
     private lateinit var printerService: PrinterService
+    private val viewModel: PrinterViewModel by viewModels()
+    
     private val printJobReceiver = object : android.content.BroadcastReceiver() {
         override fun onReceive(context: android.content.Context, intent: android.content.Intent) {
             android.util.Log.d("MainActivity", "Received broadcast: ${intent.action}")
@@ -37,24 +42,11 @@ class MainActivity : ComponentActivity() {
                 val jobSize = intent.getIntExtra("job_size", 0)
                 android.util.Log.d("MainActivity", "Print job received: $jobPath, size: $jobSize bytes")
                 
-                // Immediately refresh
-                refreshTriggerState?.value = (refreshTriggerState?.value ?: 0) + 1
-                android.util.Log.d("MainActivity", "Triggered UI refresh: ${refreshTriggerState?.value}")
-                
-                // Also queue additional refreshes with delay
-                (0..5).forEach { i ->
-                    android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-                        refreshTriggerState?.value = (refreshTriggerState?.value ?: 0) + 1
-                        android.util.Log.d("MainActivity", "Delayed refresh #$i: ${refreshTriggerState?.value}")
-                    }, (i+1) * 1000L)  // 1-6 seconds delay
-                }
+                // Trigger immediate refresh
+                viewModel.triggerRefresh()
+                android.util.Log.d("MainActivity", "Triggered UI refresh via ViewModel")
             }
         }
-    }
-    
-    // Companion object to hold a static reference to the state
-    companion object {
-        var refreshTriggerState: androidx.compose.runtime.MutableState<Int>? = null
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -73,12 +65,13 @@ class MainActivity : ComponentActivity() {
             }
         )
         
-        // Register the broadcast receiver
-        registerReceiver(
-            printJobReceiver, 
-            android.content.IntentFilter("com.example.printer.NEW_PRINT_JOB"),
-            android.content.Context.RECEIVER_NOT_EXPORTED
-        )
+        // Register the broadcast receiver with API level check
+        val intentFilter = android.content.IntentFilter("com.example.printer.NEW_PRINT_JOB")
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(printJobReceiver, intentFilter, android.content.Context.RECEIVER_NOT_EXPORTED)
+        } else {
+            registerReceiver(printJobReceiver, intentFilter)
+        }
         
         // Try to fix existing data files by renaming them to PDF
         fixDataFiles()
@@ -89,7 +82,7 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background
                 ) {
-                    MainNavigation(printerService)
+                    MainNavigation(printerService, viewModel)
                 }
             }
         }
@@ -158,7 +151,7 @@ class MainActivity : ComponentActivity() {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun MainNavigation(printerService: PrinterService) {
+fun MainNavigation(printerService: PrinterService, viewModel: PrinterViewModel) {
     var currentScreen by remember { mutableStateOf("main") }
     
     Scaffold(
@@ -199,7 +192,7 @@ fun MainNavigation(printerService: PrinterService) {
     ) { paddingValues ->
         Box(modifier = Modifier.padding(paddingValues)) {
             when (currentScreen) {
-                "main" -> PrinterApp(printerService = printerService)
+                "main" -> PrinterApp(printerService = printerService, viewModel = viewModel)
                 "settings" -> SettingsScreen(
                     printerService = printerService,
                     onBackClick = { currentScreen = "main" }
@@ -222,17 +215,17 @@ fun MainNavigation(printerService: PrinterService) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PrinterApp(
-    printerService: PrinterService
+    printerService: PrinterService,
+    viewModel: PrinterViewModel
 ) {
     val context = LocalContext.current
     var isServiceRunning by remember { mutableStateOf(false) }
     var statusMessage by remember { mutableStateOf("Printer service not running") }
     var savedFiles by remember { mutableStateOf<List<File>>(emptyList()) }
-    var refreshTrigger by remember { mutableStateOf(0) }
     var showDeleteAllDialog by remember { mutableStateOf(false) }
     
-    // Store reference to refresh trigger state in companion object for broadcast access
-    MainActivity.refreshTriggerState = remember { mutableStateOf(0) }
+    // Observe ViewModel refresh trigger for reactive updates
+    val refreshTrigger by viewModel.refreshTrigger.collectAsState()
     
     // Function to refresh the list of saved files
     val refreshSavedFiles = {
@@ -240,7 +233,7 @@ fun PrinterApp(
     }
     
     // Periodically refresh the list of saved files and also when refreshTrigger changes
-    LaunchedEffect(refreshTrigger, MainActivity.refreshTriggerState?.value) {
+    LaunchedEffect(refreshTrigger) {
         while (true) {
             refreshSavedFiles()
             delay(1000) // 1 second refresh interval
