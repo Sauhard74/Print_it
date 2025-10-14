@@ -926,7 +926,7 @@ class DocumentModifierPlugin : PrinterPlugin {
             }
             
             if (modifiedBytes != null) {
-                val modifiedJob = job.copy(
+        val modifiedJob = job.copy(
                     metadata = job.metadata + mapOf(
                         "watermark" to watermarkText,
                         "watermark_applied" to true
@@ -948,8 +948,8 @@ class DocumentModifierPlugin : PrinterPlugin {
                     metadata = job.metadata + mapOf("watermark_attempted" to true)
                 )
                 JobProcessingResult(
-                    processedBytes = null,
-                    modifiedJob = modifiedJob,
+            processedBytes = null,
+            modifiedJob = modifiedJob,
                     customMetadata = mapOf("watermark_added" to false)
                 )
             }
@@ -1200,6 +1200,17 @@ class DocumentModifierPlugin : PrinterPlugin {
 
 /**
  * Plugin that overrides IPP attributes
+ * 
+ * This plugin allows dynamic modification of IPP printer attributes to test
+ * different printer capabilities and configurations without modifying core code.
+ * 
+ * Features:
+ * - Override printer name and model information
+ * - Modify color support capabilities
+ * - Add/remove duplex printing support
+ * - Change maximum job queue size
+ * - Customize printer location and info strings
+ * - Override supported media sizes
  */
 class AttributeOverridePlugin : PrinterPlugin {
     override val id = "attribute_override"
@@ -1208,29 +1219,207 @@ class AttributeOverridePlugin : PrinterPlugin {
     override val description = "Overrides IPP attributes for testing different printer capabilities"
     override val author = "Built-in"
     
-    private var printerName: String = "Custom Virtual Printer"
-    private var maxJobs: Int = 100
-    private var colorSupported: Boolean = true
-    private var duplexSupported: Boolean = false
+    @Volatile private var enableOverride: Boolean = false
+    @Volatile private var printerName: String = "Custom Virtual Printer"
+    @Volatile private var printerLocation: String = "Mobile Device"
+    @Volatile private var printerInfo: String = "Custom Virtual Printer"
+    @Volatile private var printerModel: String = "Virtual Printer v1.0"
+    @Volatile private var maxJobs: Int = 100
+    @Volatile private var colorSupported: Boolean = true
+    @Volatile private var duplexSupported: Boolean = false
+    @Volatile private var mediaSizes: List<String> = listOf(
+        "iso_a4_210x297mm",
+        "na_letter_8.5x11in"
+    )
     
-    override suspend fun onLoad(context: Context): Boolean = true
+    override suspend fun onLoad(context: Context): Boolean {
+        Log.d("AttributeOverridePlugin", "Plugin loaded - IPP attribute override capabilities enabled")
+        return true
+    }
     
-    override suspend fun onUnload(): Boolean = true
+    override suspend fun onUnload(): Boolean {
+        Log.d("AttributeOverridePlugin", "Plugin unloaded")
+        return true
+    }
     
-    override suspend fun customizeIppAttributes(originalAttributes: List<AttributeGroup>): List<AttributeGroup>? {
-        // Could modify attributes here based on configuration
+    override suspend fun customizeIppAttributes(originalAttributes: List<com.hp.jipp.encoding.AttributeGroup>): List<com.hp.jipp.encoding.AttributeGroup>? {
+        if (!enableOverride) {
+            Log.d("AttributeOverridePlugin", "Override disabled, using original attributes")
         return null
+        }
+        
+        Log.d("AttributeOverridePlugin", "Applying attribute overrides: " +
+            "name=$printerName, color=$colorSupported, duplex=$duplexSupported")
+        
+        return try {
+            // Create modified attribute groups
+            val modifiedGroups = mutableListOf<com.hp.jipp.encoding.AttributeGroup>()
+            
+            // Keep operation attributes unchanged
+            val operationGroup = originalAttributes.firstOrNull { 
+                it.tag == com.hp.jipp.encoding.Tag.operationAttributes 
+            }
+            if (operationGroup != null) {
+                modifiedGroups.add(operationGroup)
+            }
+            
+            // Find or create printer attributes group
+            val originalPrinterGroup = originalAttributes.firstOrNull { 
+                it.tag == com.hp.jipp.encoding.Tag.printerAttributes 
+            }
+            
+            if (originalPrinterGroup != null) {
+                // Build modified printer attributes
+                val modifiedAttributes = mutableListOf<com.hp.jipp.encoding.Attribute<*>>()
+                
+                // Copy original attributes, selectively replacing ones we want to override
+                val iterator = originalPrinterGroup.iterator()
+                while (iterator.hasNext()) {
+                    val attr = iterator.next()
+                    val attrName = attr.name
+                    
+                    // Override specific attributes based on configuration
+                    when (attrName) {
+                        "printer-name" -> {
+                            modifiedAttributes.add(com.hp.jipp.model.Types.printerName.of(printerName))
+                            Log.d("AttributeOverridePlugin", "Override: printer-name = $printerName")
+                        }
+                        "printer-location" -> {
+                            modifiedAttributes.add(com.hp.jipp.model.Types.printerLocation.of(printerLocation))
+                            Log.d("AttributeOverridePlugin", "Override: printer-location = $printerLocation")
+                        }
+                        "printer-info" -> {
+                            modifiedAttributes.add(com.hp.jipp.model.Types.printerInfo.of(printerInfo))
+                            Log.d("AttributeOverridePlugin", "Override: printer-info = $printerInfo")
+                        }
+                        "printer-make-and-model" -> {
+                            modifiedAttributes.add(com.hp.jipp.model.Types.printerMakeAndModel.of(printerModel))
+                            Log.d("AttributeOverridePlugin", "Override: printer-make-and-model = $printerModel")
+                        }
+                        "color-supported" -> {
+                            modifiedAttributes.add(com.hp.jipp.model.Types.colorSupported.of(colorSupported))
+                            Log.d("AttributeOverridePlugin", "Override: color-supported = $colorSupported")
+                        }
+                        "queued-job-count" -> {
+                            // Use current queue size but respect max jobs limit
+                            val currentCount = try {
+                                (attr.getValue() as? Int) ?: 0
+                            } catch (e: Exception) {
+                                0
+                            }
+                            val limitedCount = minOf(currentCount, maxJobs)
+                            modifiedAttributes.add(com.hp.jipp.model.Types.queuedJobCount.of(limitedCount))
+                            Log.d("AttributeOverridePlugin", "Override: queued-job-count = $limitedCount (max: $maxJobs)")
+                        }
+                        "media-supported" -> {
+                            if (mediaSizes.isNotEmpty()) {
+                                modifiedAttributes.add(com.hp.jipp.model.Types.mediaSupported.of(*mediaSizes.toTypedArray()))
+                                Log.d("AttributeOverridePlugin", "Override: media-supported = ${mediaSizes.joinToString()}")
+                            } else {
+                                modifiedAttributes.add(attr)
+                            }
+                        }
+                        "sides-supported" -> {
+                            // Add duplex support if enabled
+                            if (duplexSupported) {
+                                modifiedAttributes.add(
+                                    com.hp.jipp.model.Types.sidesSupported.of(
+                                        "one-sided",
+                                        "two-sided-long-edge",
+                                        "two-sided-short-edge"
+                                    )
+                                )
+                                Log.d("AttributeOverridePlugin", "Override: Added duplex support")
+                            } else {
+                                modifiedAttributes.add(com.hp.jipp.model.Types.sidesSupported.of("one-sided"))
+                                Log.d("AttributeOverridePlugin", "Override: Duplex disabled")
+                            }
+                        }
+                        else -> {
+                            // Keep original attribute
+                            modifiedAttributes.add(attr)
+                        }
+                    }
+                }
+                
+                // Add duplex support if enabled and not already present
+                if (duplexSupported && !modifiedAttributes.any { it.name == "sides-supported" }) {
+                    modifiedAttributes.add(
+                        com.hp.jipp.model.Types.sidesSupported.of(
+                            "one-sided",
+                            "two-sided-long-edge",
+                            "two-sided-short-edge"
+                        )
+                    )
+                    modifiedAttributes.add(com.hp.jipp.model.Types.sidesDefault.of("one-sided"))
+                    Log.d("AttributeOverridePlugin", "Added duplex support attributes")
+                }
+                
+                // Create new printer attributes group with modified attributes
+                val modifiedPrinterGroup = com.hp.jipp.encoding.AttributeGroup.groupOf(
+                    com.hp.jipp.encoding.Tag.printerAttributes,
+                    *modifiedAttributes.toTypedArray()
+                )
+                modifiedGroups.add(modifiedPrinterGroup)
+                
+                Log.d("AttributeOverridePlugin", "Successfully applied ${modifiedAttributes.size} attributes")
+            } else {
+                Log.w("AttributeOverridePlugin", "No printer attributes group found in original attributes")
+                return null
+            }
+            
+            // Add any remaining groups (job attributes, etc.)
+            originalAttributes.forEach { group ->
+                if (group.tag != com.hp.jipp.encoding.Tag.operationAttributes &&
+                    group.tag != com.hp.jipp.encoding.Tag.printerAttributes) {
+                    modifiedGroups.add(group)
+                }
+            }
+            
+            modifiedGroups
+        } catch (e: Exception) {
+            Log.e("AttributeOverridePlugin", "Error applying attribute overrides", e)
+            null
+        }
     }
     
     override fun getConfigurationSchema(): PluginConfigurationSchema {
         return PluginConfigurationSchema(
             fields = listOf(
                 ConfigurationField(
+                    key = "enable_override",
+                    label = "Enable Override",
+                    type = FieldType.BOOLEAN,
+                    defaultValue = false,
+                    description = "Enable IPP attribute override functionality"
+                ),
+                ConfigurationField(
                     key = "printer_name",
                     label = "Printer Name",
                     type = FieldType.TEXT,
                     defaultValue = "Custom Virtual Printer",
                     description = "Override the printer name shown to clients"
+                ),
+                ConfigurationField(
+                    key = "printer_location",
+                    label = "Printer Location",
+                    type = FieldType.TEXT,
+                    defaultValue = "Mobile Device",
+                    description = "Override printer location string"
+                ),
+                ConfigurationField(
+                    key = "printer_info",
+                    label = "Printer Info",
+                    type = FieldType.TEXT,
+                    defaultValue = "Custom Virtual Printer",
+                    description = "Override printer information string"
+                ),
+                ConfigurationField(
+                    key = "printer_model",
+                    label = "Printer Model",
+                    type = FieldType.TEXT,
+                    defaultValue = "Virtual Printer v1.0",
+                    description = "Override printer make and model"
                 ),
                 ConfigurationField(
                     key = "max_jobs",
@@ -1253,17 +1442,36 @@ class AttributeOverridePlugin : PrinterPlugin {
                     label = "Duplex Support",
                     type = FieldType.BOOLEAN,
                     defaultValue = false,
-                    description = "Whether to advertise duplex printing support"
+                    description = "Whether to advertise duplex (double-sided) printing support"
+                ),
+                ConfigurationField(
+                    key = "media_sizes",
+                    label = "Supported Media Sizes",
+                    type = FieldType.TEXT,
+                    defaultValue = "iso_a4_210x297mm,na_letter_8.5x11in",
+                    description = "Comma-separated list of supported paper sizes (e.g., iso_a4_210x297mm,na_letter_8.5x11in,na_legal_8.5x14in)"
                 )
             )
         )
     }
     
     override suspend fun updateConfiguration(config: Map<String, Any>): Boolean {
+        enableOverride = config["enable_override"] as? Boolean ?: false
         printerName = config["printer_name"] as? String ?: "Custom Virtual Printer"
+        printerLocation = config["printer_location"] as? String ?: "Mobile Device"
+        printerInfo = config["printer_info"] as? String ?: "Custom Virtual Printer"
+        printerModel = config["printer_model"] as? String ?: "Virtual Printer v1.0"
         maxJobs = (config["max_jobs"] as? Number)?.toInt() ?: 100
         colorSupported = config["color_supported"] as? Boolean ?: true
         duplexSupported = config["duplex_supported"] as? Boolean ?: false
+        
+        // Parse media sizes from comma-separated string
+        val mediaSizesStr = config["media_sizes"] as? String ?: "iso_a4_210x297mm,na_letter_8.5x11in"
+        mediaSizes = mediaSizesStr.split(",").map { it.trim() }.filter { it.isNotBlank() }
+        
+        Log.d("AttributeOverridePlugin", "Configuration updated: " +
+            "enabled=$enableOverride, name=$printerName, color=$colorSupported, duplex=$duplexSupported, media=${mediaSizes.size} sizes")
+        
         return true
     }
 }
