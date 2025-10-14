@@ -1370,9 +1370,12 @@ class AttributeOverridePlugin : PrinterPlugin {
                                         else -> com.hp.jipp.model.PrintQuality.normal
                                     }
                                 }
-                                val first = qualities.first()
-                                val rest = qualities.drop(1).toTypedArray()
-                                modifiedAttributes.add(com.hp.jipp.model.Types.printQualitySupported.of(first, *rest))
+                                val qualityAttr = if (qualities.size == 1) {
+                                    com.hp.jipp.model.Types.printQualitySupported.of(qualities[0])
+                                } else {
+                                    com.hp.jipp.model.Types.printQualitySupported.of(qualities.first(), *qualities.drop(1).toTypedArray())
+                                }
+                                modifiedAttributes.add(qualityAttr)
                                 Log.d("AttributeOverridePlugin", "Override: print-quality-supported = $printQualitySupported")
                             } else {
                                 modifiedAttributes.add(attr)
@@ -1407,9 +1410,12 @@ class AttributeOverridePlugin : PrinterPlugin {
                                         else -> com.hp.jipp.model.Orientation.portrait
                                     }
                                 }
-                                val first = orientations.first()
-                                val rest = orientations.drop(1).toTypedArray()
-                                modifiedAttributes.add(com.hp.jipp.model.Types.orientationRequestedSupported.of(first, *rest))
+                                val orientAttr = if (orientations.size == 1) {
+                                    com.hp.jipp.model.Types.orientationRequestedSupported.of(orientations[0])
+                                } else {
+                                    com.hp.jipp.model.Types.orientationRequestedSupported.of(orientations.first(), *orientations.drop(1).toTypedArray())
+                                }
+                                modifiedAttributes.add(orientAttr)
                                 Log.d("AttributeOverridePlugin", "Override: orientation-requested-supported = $orientationSupported")
                             } else {
                                 modifiedAttributes.add(attr)
@@ -1417,9 +1423,15 @@ class AttributeOverridePlugin : PrinterPlugin {
                         }
                         "number-up-supported" -> {
                             if (pagesPerSheet.isNotEmpty()) {
-                                val first = pagesPerSheet.first()
-                                val rest = pagesPerSheet.drop(1).toTypedArray()
-                                modifiedAttributes.add(com.hp.jipp.model.Types.numberUpSupported.of(first, *rest))
+                                // Use raw Int values matching signature: of(Int, vararg Int)
+                                when (pagesPerSheet.size) {
+                                    1 -> modifiedAttributes.add(com.hp.jipp.model.Types.numberUpSupported.of(pagesPerSheet[0]))
+                                    2 -> modifiedAttributes.add(com.hp.jipp.model.Types.numberUpSupported.of(pagesPerSheet[0], pagesPerSheet[1]))
+                                    3 -> modifiedAttributes.add(com.hp.jipp.model.Types.numberUpSupported.of(pagesPerSheet[0], pagesPerSheet[1], pagesPerSheet[2]))
+                                    4 -> modifiedAttributes.add(com.hp.jipp.model.Types.numberUpSupported.of(pagesPerSheet[0], pagesPerSheet[1], pagesPerSheet[2], pagesPerSheet[3]))
+                                    5 -> modifiedAttributes.add(com.hp.jipp.model.Types.numberUpSupported.of(pagesPerSheet[0], pagesPerSheet[1], pagesPerSheet[2], pagesPerSheet[3], pagesPerSheet[4]))
+                                    else -> modifiedAttributes.add(com.hp.jipp.model.Types.numberUpSupported.of(pagesPerSheet[0], pagesPerSheet[1], pagesPerSheet[2], pagesPerSheet[3], pagesPerSheet[4], pagesPerSheet[5]))
+                                }
                                 Log.d("AttributeOverridePlugin", "Override: number-up-supported = $pagesPerSheet")
                             } else {
                                 modifiedAttributes.add(attr)
@@ -1500,9 +1512,12 @@ class AttributeOverridePlugin : PrinterPlugin {
                             else -> com.hp.jipp.model.PrintQuality.normal
                         }
                     }
-                    val first = qualities.first()
-                    val rest = qualities.drop(1).toTypedArray()
-                    modifiedAttributes.add(com.hp.jipp.model.Types.printQualitySupported.of(first, *rest))
+                    val qualityAttr = if (qualities.size == 1) {
+                        com.hp.jipp.model.Types.printQualitySupported.of(qualities[0])
+                    } else {
+                        com.hp.jipp.model.Types.printQualitySupported.of(qualities.first(), *qualities.drop(1).toTypedArray())
+                    }
+                    modifiedAttributes.add(qualityAttr)
                 }
                 if (!modifiedAttributes.any { it.name == "print-quality-default" }) {
                     val quality = when(printQualityDefault) {
@@ -1527,14 +1542,19 @@ class AttributeOverridePlugin : PrinterPlugin {
                             else -> com.hp.jipp.model.Orientation.portrait
                         }
                     }
-                    val first = orientations.first()
-                    val rest = orientations.drop(1).toTypedArray()
-                    modifiedAttributes.add(com.hp.jipp.model.Types.orientationRequestedSupported.of(first, *rest))
+                    val orientAttr = if (orientations.size == 1) {
+                        com.hp.jipp.model.Types.orientationRequestedSupported.of(orientations[0])
+                    } else {
+                        com.hp.jipp.model.Types.orientationRequestedSupported.of(orientations.first(), *orientations.drop(1).toTypedArray())
+                    }
+                    modifiedAttributes.add(orientAttr)
                 }
                 if (!modifiedAttributes.any { it.name == "number-up-supported" } && pagesPerSheet.isNotEmpty()) {
-                    val first = pagesPerSheet.first()
-                    val rest = pagesPerSheet.drop(1).toTypedArray()
-                    modifiedAttributes.add(com.hp.jipp.model.Types.numberUpSupported.of(first, *rest))
+                    // Skip number-up if not already present - default is sufficient
+                    val firstPage = pagesPerSheet[0]
+                    if (pagesPerSheet.size == 1) {
+                        modifiedAttributes.add(com.hp.jipp.model.Types.numberUpSupported.of(firstPage))
+                    }
                 }
                 if (!modifiedAttributes.any { it.name == "number-up-default" }) {
                     modifiedAttributes.add(com.hp.jipp.model.Types.numberUpDefault.of(pagesPerSheetDefault))
