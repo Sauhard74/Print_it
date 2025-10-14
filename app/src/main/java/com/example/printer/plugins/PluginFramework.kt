@@ -1220,17 +1220,46 @@ class AttributeOverridePlugin : PrinterPlugin {
     override val author = "Built-in"
     
     @Volatile private var enableOverride: Boolean = false
+    
+    // Basic Printer Information
     @Volatile private var printerName: String = "Custom Virtual Printer"
     @Volatile private var printerLocation: String = "Mobile Device"
     @Volatile private var printerInfo: String = "Custom Virtual Printer"
     @Volatile private var printerModel: String = "Virtual Printer v1.0"
+    @Volatile private var printerContact: String = "admin@example.com"
+    @Volatile private var organizationName: String = "My Organization"
+    
+    // Queue and Job Management
     @Volatile private var maxJobs: Int = 100
+    @Volatile private var acceptingJobs: Boolean = true
+    @Volatile private var printerState: String = "idle" // idle, processing, stopped
+    
+    // Capabilities
     @Volatile private var colorSupported: Boolean = true
     @Volatile private var duplexSupported: Boolean = false
     @Volatile private var mediaSizes: List<String> = listOf(
         "iso_a4_210x297mm",
         "na_letter_8.5x11in"
     )
+    
+    // Print Quality
+    @Volatile private var printQualitySupported: List<String> = listOf("draft", "normal", "high")
+    @Volatile private var printQualityDefault: String = "normal"
+    @Volatile private var printerResolution: String = "300dpi" // 300dpi, 600dpi, 1200dpi
+    
+    // Job Template Attributes
+    @Volatile private var copiesSupported: Pair<Int, Int> = Pair(1, 99)
+    @Volatile private var copiesDefault: Int = 1
+    @Volatile private var orientationSupported: List<String> = listOf("portrait", "landscape")
+    @Volatile private var orientationDefault: String = "portrait"
+    
+    // Finishing Options
+    @Volatile private var finishingsSupported: List<String> = listOf("none")
+    @Volatile private var pagesPerSheet: List<Int> = listOf(1, 2, 4, 6, 9, 16)
+    @Volatile private var pagesPerSheetDefault: Int = 1
+    
+    // Advanced Options
+    @Volatile private var customAttributesJson: String = ""
     
     override suspend fun onLoad(context: Context): Boolean {
         Log.d("AttributeOverridePlugin", "Plugin loaded - IPP attribute override capabilities enabled")
@@ -1280,6 +1309,7 @@ class AttributeOverridePlugin : PrinterPlugin {
                     
                     // Override specific attributes based on configuration
                     when (attrName) {
+                        // Basic Information
                         "printer-name" -> {
                             modifiedAttributes.add(com.hp.jipp.model.Types.printerName.of(printerName))
                             Log.d("AttributeOverridePlugin", "Override: printer-name = $printerName")
@@ -1296,12 +1326,26 @@ class AttributeOverridePlugin : PrinterPlugin {
                             modifiedAttributes.add(com.hp.jipp.model.Types.printerMakeAndModel.of(printerModel))
                             Log.d("AttributeOverridePlugin", "Override: printer-make-and-model = $printerModel")
                         }
-                        "color-supported" -> {
-                            modifiedAttributes.add(com.hp.jipp.model.Types.colorSupported.of(colorSupported))
-                            Log.d("AttributeOverridePlugin", "Override: color-supported = $colorSupported")
+                        "printer-organization" -> {
+                            modifiedAttributes.add(com.hp.jipp.model.Types.printerOrganization.of(organizationName))
+                            Log.d("AttributeOverridePlugin", "Override: printer-organization = $organizationName")
+                        }
+                        
+                        // State and Availability
+                        "printer-is-accepting-jobs" -> {
+                            modifiedAttributes.add(com.hp.jipp.model.Types.printerIsAcceptingJobs.of(acceptingJobs))
+                            Log.d("AttributeOverridePlugin", "Override: printer-is-accepting-jobs = $acceptingJobs")
+                        }
+                        "printer-state" -> {
+                            val state = when (printerState) {
+                                "processing" -> com.hp.jipp.model.PrinterState.processing
+                                "stopped" -> com.hp.jipp.model.PrinterState.stopped
+                                else -> com.hp.jipp.model.PrinterState.idle
+                            }
+                            modifiedAttributes.add(com.hp.jipp.model.Types.printerState.of(state))
+                            Log.d("AttributeOverridePlugin", "Override: printer-state = $printerState")
                         }
                         "queued-job-count" -> {
-                            // Use current queue size but respect max jobs limit
                             val currentCount = try {
                                 (attr.getValue() as? Int) ?: 0
                             } catch (e: Exception) {
@@ -1310,6 +1354,80 @@ class AttributeOverridePlugin : PrinterPlugin {
                             val limitedCount = minOf(currentCount, maxJobs)
                             modifiedAttributes.add(com.hp.jipp.model.Types.queuedJobCount.of(limitedCount))
                             Log.d("AttributeOverridePlugin", "Override: queued-job-count = $limitedCount (max: $maxJobs)")
+                        }
+                        
+                        // Capabilities
+                        "color-supported" -> {
+                            modifiedAttributes.add(com.hp.jipp.model.Types.colorSupported.of(colorSupported))
+                            Log.d("AttributeOverridePlugin", "Override: color-supported = $colorSupported")
+                        }
+                        "print-quality-supported" -> {
+                            if (printQualitySupported.isNotEmpty()) {
+                                val qualities = printQualitySupported.map { 
+                                    when(it) {
+                                        "draft" -> com.hp.jipp.model.PrintQuality.draft
+                                        "high" -> com.hp.jipp.model.PrintQuality.high
+                                        else -> com.hp.jipp.model.PrintQuality.normal
+                                    }
+                                }
+                                val first = qualities.first()
+                                val rest = qualities.drop(1).toTypedArray()
+                                modifiedAttributes.add(com.hp.jipp.model.Types.printQualitySupported.of(first, *rest))
+                                Log.d("AttributeOverridePlugin", "Override: print-quality-supported = $printQualitySupported")
+                            } else {
+                                modifiedAttributes.add(attr)
+                            }
+                        }
+                        "print-quality-default" -> {
+                            val quality = when(printQualityDefault) {
+                                "draft" -> com.hp.jipp.model.PrintQuality.draft
+                                "high" -> com.hp.jipp.model.PrintQuality.high
+                                else -> com.hp.jipp.model.PrintQuality.normal
+                            }
+                            modifiedAttributes.add(com.hp.jipp.model.Types.printQualityDefault.of(quality))
+                            Log.d("AttributeOverridePlugin", "Override: print-quality-default = $printQualityDefault")
+                        }
+                        "copies-supported" -> {
+                            modifiedAttributes.add(com.hp.jipp.model.Types.copiesSupported.of(
+                                copiesSupported.first..copiesSupported.second
+                            ))
+                            Log.d("AttributeOverridePlugin", "Override: copies-supported = ${copiesSupported.first}-${copiesSupported.second}")
+                        }
+                        "copies-default" -> {
+                            modifiedAttributes.add(com.hp.jipp.model.Types.copiesDefault.of(copiesDefault))
+                            Log.d("AttributeOverridePlugin", "Override: copies-default = $copiesDefault")
+                        }
+                        "orientation-requested-supported" -> {
+                            if (orientationSupported.isNotEmpty()) {
+                                val orientations = orientationSupported.map {
+                                    when(it) {
+                                        "landscape" -> com.hp.jipp.model.Orientation.landscape
+                                        "reverse-landscape" -> com.hp.jipp.model.Orientation.reverseLandscape
+                                        "reverse-portrait" -> com.hp.jipp.model.Orientation.reversePortrait
+                                        else -> com.hp.jipp.model.Orientation.portrait
+                                    }
+                                }
+                                val first = orientations.first()
+                                val rest = orientations.drop(1).toTypedArray()
+                                modifiedAttributes.add(com.hp.jipp.model.Types.orientationRequestedSupported.of(first, *rest))
+                                Log.d("AttributeOverridePlugin", "Override: orientation-requested-supported = $orientationSupported")
+                            } else {
+                                modifiedAttributes.add(attr)
+                            }
+                        }
+                        "number-up-supported" -> {
+                            if (pagesPerSheet.isNotEmpty()) {
+                                val first = pagesPerSheet.first()
+                                val rest = pagesPerSheet.drop(1).toTypedArray()
+                                modifiedAttributes.add(com.hp.jipp.model.Types.numberUpSupported.of(first, *rest))
+                                Log.d("AttributeOverridePlugin", "Override: number-up-supported = $pagesPerSheet")
+                            } else {
+                                modifiedAttributes.add(attr)
+                            }
+                        }
+                        "number-up-default" -> {
+                            modifiedAttributes.add(com.hp.jipp.model.Types.numberUpDefault.of(pagesPerSheetDefault))
+                            Log.d("AttributeOverridePlugin", "Override: number-up-default = $pagesPerSheetDefault")
                         }
                         "media-supported" -> {
                             if (mediaSizes.isNotEmpty()) {
@@ -1370,6 +1488,58 @@ class AttributeOverridePlugin : PrinterPlugin {
                     Log.d("AttributeOverridePlugin", "Added duplex support attributes")
                 }
                 
+                // Add new attributes not present in defaults
+                if (!modifiedAttributes.any { it.name == "printer-organization" }) {
+                    modifiedAttributes.add(com.hp.jipp.model.Types.printerOrganization.of(organizationName))
+                }
+                if (!modifiedAttributes.any { it.name == "print-quality-supported" } && printQualitySupported.isNotEmpty()) {
+                    val qualities = printQualitySupported.map { 
+                        when(it) {
+                            "draft" -> com.hp.jipp.model.PrintQuality.draft
+                            "high" -> com.hp.jipp.model.PrintQuality.high
+                            else -> com.hp.jipp.model.PrintQuality.normal
+                        }
+                    }
+                    val first = qualities.first()
+                    val rest = qualities.drop(1).toTypedArray()
+                    modifiedAttributes.add(com.hp.jipp.model.Types.printQualitySupported.of(first, *rest))
+                }
+                if (!modifiedAttributes.any { it.name == "print-quality-default" }) {
+                    val quality = when(printQualityDefault) {
+                        "draft" -> com.hp.jipp.model.PrintQuality.draft
+                        "high" -> com.hp.jipp.model.PrintQuality.high
+                        else -> com.hp.jipp.model.PrintQuality.normal
+                    }
+                    modifiedAttributes.add(com.hp.jipp.model.Types.printQualityDefault.of(quality))
+                }
+                if (!modifiedAttributes.any { it.name == "copies-supported" }) {
+                    modifiedAttributes.add(com.hp.jipp.model.Types.copiesSupported.of(copiesSupported.first..copiesSupported.second))
+                }
+                if (!modifiedAttributes.any { it.name == "copies-default" }) {
+                    modifiedAttributes.add(com.hp.jipp.model.Types.copiesDefault.of(copiesDefault))
+                }
+                if (!modifiedAttributes.any { it.name == "orientation-requested-supported" } && orientationSupported.isNotEmpty()) {
+                    val orientations = orientationSupported.map {
+                        when(it) {
+                            "landscape" -> com.hp.jipp.model.Orientation.landscape
+                            "reverse-landscape" -> com.hp.jipp.model.Orientation.reverseLandscape
+                            "reverse-portrait" -> com.hp.jipp.model.Orientation.reversePortrait
+                            else -> com.hp.jipp.model.Orientation.portrait
+                        }
+                    }
+                    val first = orientations.first()
+                    val rest = orientations.drop(1).toTypedArray()
+                    modifiedAttributes.add(com.hp.jipp.model.Types.orientationRequestedSupported.of(first, *rest))
+                }
+                if (!modifiedAttributes.any { it.name == "number-up-supported" } && pagesPerSheet.isNotEmpty()) {
+                    val first = pagesPerSheet.first()
+                    val rest = pagesPerSheet.drop(1).toTypedArray()
+                    modifiedAttributes.add(com.hp.jipp.model.Types.numberUpSupported.of(first, *rest))
+                }
+                if (!modifiedAttributes.any { it.name == "number-up-default" }) {
+                    modifiedAttributes.add(com.hp.jipp.model.Types.numberUpDefault.of(pagesPerSheetDefault))
+                }
+                
                 // Create new printer attributes group with modified attributes
                 val modifiedPrinterGroup = com.hp.jipp.encoding.AttributeGroup.groupOf(
                     com.hp.jipp.encoding.Tag.printerAttributes,
@@ -1401,91 +1571,247 @@ class AttributeOverridePlugin : PrinterPlugin {
     override fun getConfigurationSchema(): PluginConfigurationSchema {
         return PluginConfigurationSchema(
             fields = listOf(
+                // === SECTION 1: ENABLE/DISABLE ===
                 ConfigurationField(
                     key = "enable_override",
-                    label = "Enable Override",
+                    label = "🎛️ Enable Override",
                     type = FieldType.BOOLEAN,
                     defaultValue = false,
-                    description = "Enable IPP attribute override functionality"
+                    description = "Master switch - Enable all IPP attribute overrides"
                 ),
+                
+                // === SECTION 2: BASIC INFORMATION ===
                 ConfigurationField(
                     key = "printer_name",
-                    label = "Printer Name",
+                    label = "📝 Printer Name",
                     type = FieldType.TEXT,
                     defaultValue = "Custom Virtual Printer",
-                    description = "Override the printer name shown to clients"
+                    description = "Printer name shown to clients (printer-name)"
                 ),
                 ConfigurationField(
                     key = "printer_location",
-                    label = "Printer Location",
+                    label = "📍 Location",
                     type = FieldType.TEXT,
                     defaultValue = "Mobile Device",
-                    description = "Override printer location string"
+                    description = "Physical location (printer-location)"
                 ),
                 ConfigurationField(
                     key = "printer_info",
-                    label = "Printer Info",
+                    label = "ℹ️ Printer Info",
                     type = FieldType.TEXT,
                     defaultValue = "Custom Virtual Printer",
-                    description = "Override printer information string"
+                    description = "Human-readable description (printer-info)"
                 ),
                 ConfigurationField(
                     key = "printer_model",
-                    label = "Printer Model",
+                    label = "🏷️ Model",
                     type = FieldType.TEXT,
                     defaultValue = "Virtual Printer v1.0",
-                    description = "Override printer make and model"
+                    description = "Make and model (printer-make-and-model)"
+                ),
+                ConfigurationField(
+                    key = "organization_name",
+                    label = "🏢 Organization",
+                    type = FieldType.TEXT,
+                    defaultValue = "My Organization",
+                    description = "Organization name (printer-organization)"
+                ),
+                ConfigurationField(
+                    key = "printer_contact",
+                    label = "📧 Contact",
+                    type = FieldType.TEXT,
+                    defaultValue = "admin@example.com",
+                    description = "Contact information for support"
+                ),
+                
+                // === SECTION 3: STATE & AVAILABILITY ===
+                ConfigurationField(
+                    key = "accepting_jobs",
+                    label = "✅ Accepting Jobs",
+                    type = FieldType.BOOLEAN,
+                    defaultValue = true,
+                    description = "Whether printer accepts new jobs (printer-is-accepting-jobs)"
+                ),
+                ConfigurationField(
+                    key = "printer_state",
+                    label = "🔄 Printer State",
+                    type = FieldType.SELECT,
+                    defaultValue = "idle",
+                    options = listOf("idle", "processing", "stopped"),
+                    description = "Current printer state (printer-state)"
                 ),
                 ConfigurationField(
                     key = "max_jobs",
-                    label = "Maximum Jobs",
+                    label = "📊 Max Queue Size",
                     type = FieldType.NUMBER,
                     defaultValue = 100,
-                    description = "Maximum number of queued jobs",
                     min = 1,
-                    max = 1000
+                    max = 1000,
+                    description = "Maximum queued jobs (affects queued-job-count)"
                 ),
+                
+                // === SECTION 4: PRINT CAPABILITIES ===
                 ConfigurationField(
                     key = "color_supported",
-                    label = "Color Support",
+                    label = "🎨 Color Support",
                     type = FieldType.BOOLEAN,
                     defaultValue = true,
-                    description = "Whether to advertise color printing support"
+                    description = "Advertise color printing (color-supported)"
                 ),
                 ConfigurationField(
                     key = "duplex_supported",
-                    label = "Duplex Support",
+                    label = "📄 Duplex Support",
                     type = FieldType.BOOLEAN,
                     defaultValue = false,
-                    description = "Whether to advertise duplex (double-sided) printing support"
+                    description = "Two-sided printing (sides-supported)"
                 ),
                 ConfigurationField(
                     key = "media_sizes",
-                    label = "Supported Media Sizes",
+                    label = "📏 Paper Sizes",
                     type = FieldType.TEXT,
-                    defaultValue = "iso_a4_210x297mm,na_letter_8.5x11in",
-                    description = "Comma-separated list of supported paper sizes (e.g., iso_a4_210x297mm,na_letter_8.5x11in,na_legal_8.5x14in)"
+                    defaultValue = "iso_a4_210x297mm,na_letter_8.5x11in,na_legal_8.5x14in",
+                    description = "Comma-separated media sizes (media-supported)"
+                ),
+                
+                // === SECTION 5: PRINT QUALITY ===
+                ConfigurationField(
+                    key = "print_quality_supported",
+                    label = "⚙️ Quality Levels",
+                    type = FieldType.TEXT,
+                    defaultValue = "draft,normal,high",
+                    description = "Comma-separated: draft, normal, high (print-quality-supported)"
+                ),
+                ConfigurationField(
+                    key = "print_quality_default",
+                    label = "🎯 Default Quality",
+                    type = FieldType.SELECT,
+                    defaultValue = "normal",
+                    options = listOf("draft", "normal", "high"),
+                    description = "Default print quality (print-quality-default)"
+                ),
+                ConfigurationField(
+                    key = "printer_resolution",
+                    label = "🔬 Resolution",
+                    type = FieldType.SELECT,
+                    defaultValue = "600dpi",
+                    options = listOf("300dpi", "600dpi", "1200dpi", "2400dpi"),
+                    description = "Printer resolution (printer-resolution-supported)"
+                ),
+                
+                // === SECTION 6: JOB TEMPLATE ATTRIBUTES ===
+                ConfigurationField(
+                    key = "copies_min",
+                    label = "📑 Min Copies",
+                    type = FieldType.NUMBER,
+                    defaultValue = 1,
+                    min = 1,
+                    max = 99,
+                    description = "Minimum copies supported (copies-supported min)"
+                ),
+                ConfigurationField(
+                    key = "copies_max",
+                    label = "📑 Max Copies",
+                    type = FieldType.NUMBER,
+                    defaultValue = 99,
+                    min = 1,
+                    max = 999,
+                    description = "Maximum copies supported (copies-supported max)"
+                ),
+                ConfigurationField(
+                    key = "copies_default",
+                    label = "📋 Default Copies",
+                    type = FieldType.NUMBER,
+                    defaultValue = 1,
+                    min = 1,
+                    max = 99,
+                    description = "Default number of copies (copies-default)"
+                ),
+                ConfigurationField(
+                    key = "orientation_supported",
+                    label = "🔄 Orientations",
+                    type = FieldType.TEXT,
+                    defaultValue = "portrait,landscape",
+                    description = "Comma-separated: portrait, landscape, reverse-portrait, reverse-landscape"
+                ),
+                ConfigurationField(
+                    key = "pages_per_sheet_supported",
+                    label = "📃 N-up Layouts",
+                    type = FieldType.TEXT,
+                    defaultValue = "1,2,4,6,9,16",
+                    description = "Pages per sheet (number-up-supported)"
+                ),
+                ConfigurationField(
+                    key = "pages_per_sheet_default",
+                    label = "📃 Default N-up",
+                    type = FieldType.SELECT,
+                    defaultValue = "1",
+                    options = listOf("1", "2", "4", "6", "9", "16"),
+                    description = "Default pages per sheet (number-up-default)"
+                ),
+                
+                // === SECTION 7: ADVANCED ===
+                ConfigurationField(
+                    key = "custom_attributes_json",
+                    label = "⚡ Custom Attributes (JSON)",
+                    type = FieldType.TEXT,
+                    defaultValue = "",
+                    description = "Advanced: Add any IPP attribute as JSON (e.g., {\"attr-name\": \"value\"})"
                 )
             )
         )
     }
     
     override suspend fun updateConfiguration(config: Map<String, Any>): Boolean {
+        // Master switch
         enableOverride = config["enable_override"] as? Boolean ?: false
+        
+        // Basic Information
         printerName = config["printer_name"] as? String ?: "Custom Virtual Printer"
         printerLocation = config["printer_location"] as? String ?: "Mobile Device"
         printerInfo = config["printer_info"] as? String ?: "Custom Virtual Printer"
         printerModel = config["printer_model"] as? String ?: "Virtual Printer v1.0"
+        organizationName = config["organization_name"] as? String ?: "My Organization"
+        printerContact = config["printer_contact"] as? String ?: "admin@example.com"
+        
+        // State & Availability
+        acceptingJobs = config["accepting_jobs"] as? Boolean ?: true
+        printerState = config["printer_state"] as? String ?: "idle"
         maxJobs = (config["max_jobs"] as? Number)?.toInt() ?: 100
+        
+        // Capabilities
         colorSupported = config["color_supported"] as? Boolean ?: true
         duplexSupported = config["duplex_supported"] as? Boolean ?: false
         
-        // Parse media sizes from comma-separated string
+        // Media Sizes
         val mediaSizesStr = config["media_sizes"] as? String ?: "iso_a4_210x297mm,na_letter_8.5x11in"
         mediaSizes = mediaSizesStr.split(",").map { it.trim() }.filter { it.isNotBlank() }
         
+        // Print Quality
+        val qualityStr = config["print_quality_supported"] as? String ?: "draft,normal,high"
+        printQualitySupported = qualityStr.split(",").map { it.trim() }.filter { it.isNotBlank() }
+        printQualityDefault = config["print_quality_default"] as? String ?: "normal"
+        printerResolution = config["printer_resolution"] as? String ?: "600dpi"
+        
+        // Job Template Attributes
+        val copiesMin = (config["copies_min"] as? Number)?.toInt() ?: 1
+        val copiesMax = (config["copies_max"] as? Number)?.toInt() ?: 99
+        copiesSupported = Pair(copiesMin, copiesMax)
+        copiesDefault = (config["copies_default"] as? Number)?.toInt() ?: 1
+        
+        val orientationStr = config["orientation_supported"] as? String ?: "portrait,landscape"
+        orientationSupported = orientationStr.split(",").map { it.trim() }.filter { it.isNotBlank() }
+        
+        val pagesPerSheetStr = config["pages_per_sheet_supported"] as? String ?: "1,2,4,6,9,16"
+        pagesPerSheet = pagesPerSheetStr.split(",").mapNotNull { it.trim().toIntOrNull() }
+        pagesPerSheetDefault = (config["pages_per_sheet_default"] as? String)?.toIntOrNull() ?: 1
+        
+        // Advanced
+        customAttributesJson = config["custom_attributes_json"] as? String ?: ""
+        
         Log.d("AttributeOverridePlugin", "Configuration updated: " +
-            "enabled=$enableOverride, name=$printerName, color=$colorSupported, duplex=$duplexSupported, media=${mediaSizes.size} sizes")
+            "enabled=$enableOverride, name=$printerName, color=$colorSupported, duplex=$duplexSupported, " +
+            "quality=$printQualitySupported, resolution=$printerResolution, media=${mediaSizes.size} sizes, " +
+            "copies=$copiesMin-$copiesMax, n-up=${pagesPerSheet.size} options")
         
         return true
     }
