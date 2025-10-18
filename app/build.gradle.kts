@@ -59,10 +59,10 @@ android {
 
 dependencies {
     implementation(platform("org.jetbrains.kotlin:kotlin-bom:1.9.22"))
-    implementation("androidx.core:core-ktx:1.12.0")
-    implementation(libs.androidx.core.ktx)
+    implementation(libs.core.ktx)  // Using newer version (1.15.0) from catalog
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.7.0")
+    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.7.0")
     implementation(libs.androidx.activity.compose)
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.compose.ui)
@@ -88,7 +88,6 @@ dependencies {
     // PdfBox for PDF manipulation
     implementation("com.tom-roush:pdfbox-android:2.0.27.0")
     
-    implementation(libs.core.ktx)
     implementation(kotlin("stdlib", "1.9.22"))
     testImplementation(libs.junit)
     androidTestImplementation(libs.ext.junit)
