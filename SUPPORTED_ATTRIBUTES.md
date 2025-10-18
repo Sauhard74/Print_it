@@ -23,12 +23,12 @@ The printer applies IPP attributes in the following priority order (highest prio
 | `printer-state` | enum | idle | Current printer state (idle/processing/stopped) |
 | `printer-state-reasons` | keyword | "none" | Reasons for current state |
 | `printer-is-accepting-jobs` | boolean | true | Whether printer accepts new jobs |
-| `printer-uri` | uri | `ipp://<device-ip>:9100/` | Printer's IPP endpoint |
+| `printer-uri` | uri | `ipp://<device-ip>:631/` | Printer's IPP endpoint |
 | `printer-location` | text | "Mobile Device" | Physical location of printer |
 | `printer-info` | text | "Virtual Printer - Mobile PDF Printer" | Human-readable printer description |
 | `printer-make-and-model` | text | "Virtual Printer v1.0" | Manufacturer and model information |
 | `printer-up-time` | integer | Current uptime | Seconds since printer started |
-| `printer-uri-supported` | uri | `ipp://<device-ip>:9100/` | List of supported URIs |
+| `printer-uri-supported` | uri | `ipp://<device-ip>:631/` | List of supported URIs |
 | `queued-job-count` | integer | 0 | Number of jobs currently queued |
 
 ### Character Set and Language
@@ -92,8 +92,9 @@ The printer applies IPP attributes in the following priority order (highest prio
 - `Validate-Job` (0x0004) - Validate job attributes
 - `Create-Job` (0x0005) - Create a job without document
 - `Send-Document` (0x0006) - Send document to created job
-- `Get-Printer-Attributes` (0x000B) - Get printer capabilities
+- `Cancel-Job` (0x0008) - Cancel a print job
 - `Get-Job-Attributes` (0x0009) - Get job status
+- `Get-Printer-Attributes` (0x000B) - Get printer capabilities
 
 ### Printer Capabilities
 | Attribute | Type | Default Value | Description |
@@ -203,7 +204,7 @@ All attributes listed in this document are **functional** and affect printer beh
 Use `ipptool` to query the printer:
 
 ```bash
-ipptool -tv ipp://<device-ip>:9100/ get-printer-attributes.test
+ipptool -tv ipp://<device-ip>:631/ get-printer-attributes.test
 ```
 
 ### Test Custom Attributes

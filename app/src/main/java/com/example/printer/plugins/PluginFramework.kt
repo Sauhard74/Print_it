@@ -1271,6 +1271,29 @@ class AttributeOverridePlugin : PrinterPlugin {
         return true
     }
     
+    /**
+     * Helper function to map print quality strings to PrintQuality enum values
+     */
+    private fun mapToPrintQuality(quality: String): com.hp.jipp.model.PrintQuality {
+        return when(quality) {
+            "draft" -> com.hp.jipp.model.PrintQuality.draft
+            "high" -> com.hp.jipp.model.PrintQuality.high
+            else -> com.hp.jipp.model.PrintQuality.normal
+        }
+    }
+    
+    /**
+     * Helper function to create print-quality-supported attribute from a list of quality strings
+     */
+    private fun createPrintQualitySupportedAttribute(qualities: List<String>): com.hp.jipp.encoding.Attribute<*> {
+        val qualityEnums = qualities.map { mapToPrintQuality(it) }
+        return if (qualityEnums.size == 1) {
+            com.hp.jipp.model.Types.printQualitySupported.of(qualityEnums[0])
+        } else {
+            com.hp.jipp.model.Types.printQualitySupported.of(qualityEnums.first(), *qualityEnums.drop(1).toTypedArray())
+        }
+    }
+    
     override suspend fun customizeIppAttributes(originalAttributes: List<com.hp.jipp.encoding.AttributeGroup>): List<com.hp.jipp.encoding.AttributeGroup>? {
         if (!enableOverride) {
             Log.d("AttributeOverridePlugin", "Override disabled, using original attributes")
@@ -1363,31 +1386,14 @@ class AttributeOverridePlugin : PrinterPlugin {
                         }
                         "print-quality-supported" -> {
                             if (printQualitySupported.isNotEmpty()) {
-                                val qualities = printQualitySupported.map { 
-                                    when(it) {
-                                        "draft" -> com.hp.jipp.model.PrintQuality.draft
-                                        "high" -> com.hp.jipp.model.PrintQuality.high
-                                        else -> com.hp.jipp.model.PrintQuality.normal
-                                    }
-                                }
-                                val qualityAttr = if (qualities.size == 1) {
-                                    com.hp.jipp.model.Types.printQualitySupported.of(qualities[0])
-                                } else {
-                                    com.hp.jipp.model.Types.printQualitySupported.of(qualities.first(), *qualities.drop(1).toTypedArray())
-                                }
-                                modifiedAttributes.add(qualityAttr)
+                                modifiedAttributes.add(createPrintQualitySupportedAttribute(printQualitySupported))
                                 Log.d("AttributeOverridePlugin", "Override: print-quality-supported = $printQualitySupported")
                             } else {
                                 modifiedAttributes.add(attr)
                             }
                         }
                         "print-quality-default" -> {
-                            val quality = when(printQualityDefault) {
-                                "draft" -> com.hp.jipp.model.PrintQuality.draft
-                                "high" -> com.hp.jipp.model.PrintQuality.high
-                                else -> com.hp.jipp.model.PrintQuality.normal
-                            }
-                            modifiedAttributes.add(com.hp.jipp.model.Types.printQualityDefault.of(quality))
+                            modifiedAttributes.add(com.hp.jipp.model.Types.printQualityDefault.of(mapToPrintQuality(printQualityDefault)))
                             Log.d("AttributeOverridePlugin", "Override: print-quality-default = $printQualityDefault")
                         }
                         "copies-supported" -> {
@@ -1505,27 +1511,10 @@ class AttributeOverridePlugin : PrinterPlugin {
                     modifiedAttributes.add(com.hp.jipp.model.Types.printerOrganization.of(organizationName))
                 }
                 if (!modifiedAttributes.any { it.name == "print-quality-supported" } && printQualitySupported.isNotEmpty()) {
-                    val qualities = printQualitySupported.map { 
-                        when(it) {
-                            "draft" -> com.hp.jipp.model.PrintQuality.draft
-                            "high" -> com.hp.jipp.model.PrintQuality.high
-                            else -> com.hp.jipp.model.PrintQuality.normal
-                        }
-                    }
-                    val qualityAttr = if (qualities.size == 1) {
-                        com.hp.jipp.model.Types.printQualitySupported.of(qualities[0])
-                    } else {
-                        com.hp.jipp.model.Types.printQualitySupported.of(qualities.first(), *qualities.drop(1).toTypedArray())
-                    }
-                    modifiedAttributes.add(qualityAttr)
+                    modifiedAttributes.add(createPrintQualitySupportedAttribute(printQualitySupported))
                 }
                 if (!modifiedAttributes.any { it.name == "print-quality-default" }) {
-                    val quality = when(printQualityDefault) {
-                        "draft" -> com.hp.jipp.model.PrintQuality.draft
-                        "high" -> com.hp.jipp.model.PrintQuality.high
-                        else -> com.hp.jipp.model.PrintQuality.normal
-                    }
-                    modifiedAttributes.add(com.hp.jipp.model.Types.printQualityDefault.of(quality))
+                    modifiedAttributes.add(com.hp.jipp.model.Types.printQualityDefault.of(mapToPrintQuality(printQualityDefault)))
                 }
                 if (!modifiedAttributes.any { it.name == "copies-supported" }) {
                     modifiedAttributes.add(com.hp.jipp.model.Types.copiesSupported.of(copiesSupported.first..copiesSupported.second))

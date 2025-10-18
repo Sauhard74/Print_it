@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <network-security-config>
     <!-- 
-        Cleartext HTTP traffic is required for IPP protocol (Internet Printing Protocol)
-        which traditionally uses HTTP on port 631/8631 without TLS.
+        Cleartext HTTP traffic is required for IPP protocol (Internet Printing Protocol).
+        IPP traditionally uses port 631, but this app uses port 8631 (non-privileged).
         Restricted to local network and localhost only for security.
     -->
     <domain-config cleartextTrafficPermitted="true">
