@@ -53,6 +53,20 @@ fun JobManagementScreen(
     var showSimulationConfig by remember { mutableStateOf(false) }
     var selectedJobForAction by remember { mutableStateOf<PrintJob?>(null) }
     var showActionDialog by remember { mutableStateOf(false) }
+    var showFilterDialog by remember { mutableStateOf(false) }
+    var filterState by remember { mutableStateOf(JobFilterState()) }
+    
+    // Filter jobs based on filter state
+    val filteredJobs = remember(jobs, filterState) {
+        jobs.filter { job ->
+            val matchesState = filterState.selectedStates.isEmpty() || filterState.selectedStates.contains(job.state)
+            val matchesFormat = filterState.selectedFormat == null || job.documentFormat.contains(filterState.selectedFormat!!, ignoreCase = true)
+            val matchesUser = filterState.userFilter.isEmpty() || job.jobOriginatingUserName.contains(filterState.userFilter, ignoreCase = true)
+            val matchesName = filterState.nameFilter.isEmpty() || job.getReadableName().contains(filterState.nameFilter, ignoreCase = true)
+            
+            matchesState && matchesFormat && matchesUser && matchesName
+        }
+    }
     
     Scaffold(
         topBar = {
@@ -115,20 +129,64 @@ fun JobManagementScreen(
                         fontWeight = FontWeight.Bold
                     )
                     
-                    // Filter/Sort options could go here
-                    IconButton(onClick = { /* TODO: Add filtering */ }) {
-                        Icon(Icons.Default.Settings, "Filter")
+                    // Filter/Sort options
+                    IconButton(onClick = { showFilterDialog = true }) {
+                        Icon(
+                            Icons.Default.FilterList, 
+                            "Filter",
+                            tint = if (filterState.hasActiveFilters()) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                MaterialTheme.colorScheme.onSurface
+                            }
+                        )
                     }
                 }
             }
             
             // Job List
-            if (jobs.isEmpty()) {
+            if (filteredJobs.isEmpty()) {
                 item {
-                    EmptyJobsCard()
+                    if (jobs.isEmpty()) {
+                        EmptyJobsCard()
+                    } else {
+                        Card(
+                            modifier = Modifier.fillMaxWidth(),
+                            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(32.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Column(
+                                    horizontalAlignment = Alignment.CenterHorizontally
+                                ) {
+                                    Icon(
+                                        Icons.Default.FilterList,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(48.dp),
+                                        tint = MaterialTheme.colorScheme.outline
+                                    )
+                                    Spacer(modifier = Modifier.height(16.dp))
+                                    Text(
+                                        text = "No jobs match the current filters",
+                                        style = MaterialTheme.typography.titleMedium,
+                                        color = MaterialTheme.colorScheme.outline
+                                    )
+                                    Text(
+                                        text = "Try adjusting your filter criteria",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.outline
+                                    )
+                                }
+                            }
+                        }
+                    }
                 }
             } else {
-                items(jobs) { job ->
+                items(filteredJobs) { job ->
                     JobCard(
                         job = job,
                         onJobClick = { 
@@ -201,6 +259,40 @@ fun JobManagementScreen(
             simulator = simulator,
             onDismiss = { showSimulationConfig = false }
         )
+    }
+    
+    // Filter Dialog
+    if (showFilterDialog) {
+        JobFilterDialog(
+            filterState = filterState,
+            availableFormats = jobs.map { it.documentFormat }.distinct(),
+            onDismiss = { showFilterDialog = false },
+            onApplyFilters = { newState ->
+                filterState = newState
+                showFilterDialog = false
+            },
+            onClearFilters = {
+                filterState = JobFilterState()
+                showFilterDialog = false
+            }
+        )
+    }
+}
+
+/**
+ * State class for job filtering
+ */
+data class JobFilterState(
+    val selectedStates: Set<PrintJobState> = emptySet(),
+    val selectedFormat: String? = null,
+    val userFilter: String = "",
+    val nameFilter: String = ""
+) {
+    fun hasActiveFilters(): Boolean {
+        return selectedStates.isNotEmpty() || 
+               selectedFormat != null || 
+               userFilter.isNotEmpty() || 
+               nameFilter.isNotEmpty()
     }
 }
 
@@ -831,4 +923,177 @@ fun SimulationConfigDialog(
 
 private fun formatTimestamp(timestamp: Long): String {
     return SimpleDateFormat("MMM dd, HH:mm", Locale.getDefault()).format(Date(timestamp))
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun JobFilterDialog(
+    filterState: JobFilterState,
+    availableFormats: List<String>,
+    onDismiss: () -> Unit,
+    onApplyFilters: (JobFilterState) -> Unit,
+    onClearFilters: () -> Unit
+) {
+    var selectedStates by remember { mutableStateOf(filterState.selectedStates.toMutableSet()) }
+    var selectedFormat by remember { mutableStateOf(filterState.selectedFormat) }
+    var userFilter by remember { mutableStateOf(filterState.userFilter) }
+    var nameFilter by remember { mutableStateOf(filterState.nameFilter) }
+    
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Text("Filter Jobs")
+        },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .verticalScroll(rememberScrollState())
+                    .height(400.dp)
+            ) {
+                // State filter
+                Text(
+                    text = "Job State:",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(bottom = 8.dp)
+                )
+                PrintJobState.values().forEach { state ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Checkbox(
+                            checked = selectedStates.contains(state),
+                            onCheckedChange = { checked ->
+                                if (checked) {
+                                    selectedStates.add(state)
+                                } else {
+                                    selectedStates.remove(state)
+                                }
+                            }
+                        )
+                        Text(
+                            text = when (state) {
+                                PrintJobState.PENDING -> "Pending"
+                                PrintJobState.HELD -> "Held"
+                                PrintJobState.PROCESSING -> "Processing"
+                                PrintJobState.STOPPED -> "Stopped"
+                                PrintJobState.CANCELED -> "Canceled"
+                                PrintJobState.ABORTED -> "Aborted"
+                                PrintJobState.COMPLETED -> "Completed"
+                            },
+                            modifier = Modifier.padding(start = 8.dp)
+                        )
+                    }
+                }
+                
+                Spacer(modifier = Modifier.height(16.dp))
+                
+                // Format filter
+                Text(
+                    text = "Document Format:",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(bottom = 8.dp)
+                )
+                var formatExpanded by remember { mutableStateOf(false) }
+                ExposedDropdownMenuBox(
+                    expanded = formatExpanded,
+                    onExpandedChange = { formatExpanded = it }
+                ) {
+                    OutlinedTextField(
+                        value = selectedFormat ?: "All Formats",
+                        onValueChange = { },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .menuAnchor(),
+                        readOnly = true,
+                        trailingIcon = {
+                            ExposedDropdownMenuDefaults.TrailingIcon(expanded = formatExpanded)
+                        }
+                    )
+                    ExposedDropdownMenu(
+                        expanded = formatExpanded,
+                        onDismissRequest = { formatExpanded = false }
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text("All Formats") },
+                            onClick = {
+                                selectedFormat = null
+                                formatExpanded = false
+                            }
+                        )
+                        availableFormats.forEach { format ->
+                            DropdownMenuItem(
+                                text = { Text(format) },
+                                onClick = {
+                                    selectedFormat = format
+                                    formatExpanded = false
+                                }
+                            )
+                        }
+                    }
+                }
+                
+                Spacer(modifier = Modifier.height(16.dp))
+                
+                // User filter
+                Text(
+                    text = "User Name:",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(bottom = 8.dp)
+                )
+                OutlinedTextField(
+                    value = userFilter,
+                    onValueChange = { userFilter = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    placeholder = { Text("Filter by user name...") }
+                )
+                
+                Spacer(modifier = Modifier.height(16.dp))
+                
+                // Name filter
+                Text(
+                    text = "Job Name:",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(bottom = 8.dp)
+                )
+                OutlinedTextField(
+                    value = nameFilter,
+                    onValueChange = { nameFilter = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    placeholder = { Text("Filter by job name...") }
+                )
+            }
+        },
+        confirmButton = {
+            Row {
+                TextButton(onClick = onClearFilters) {
+                    Text("Clear")
+                }
+                TextButton(
+                    onClick = {
+                        onApplyFilters(
+                            JobFilterState(
+                                selectedStates = selectedStates,
+                                selectedFormat = selectedFormat,
+                                userFilter = userFilter,
+                                nameFilter = nameFilter
+                            )
+                        )
+                    }
+                ) {
+                    Text("Apply")
+                }
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    )
 }

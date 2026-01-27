@@ -51,6 +51,8 @@ fun PluginManagementScreen(
     var showPluginDetails by remember { mutableStateOf(false) }
     var showConfigDialog by remember { mutableStateOf(false) }
     var pluginToConfig by remember { mutableStateOf<PluginMetadata?>(null) }
+    var showBulkOperationsMenu by remember { mutableStateOf(false) }
+    var selectedPluginsForBulk by remember { mutableStateOf<Set<String>>(emptySet()) }
     
     Scaffold(
         topBar = {
@@ -152,9 +154,76 @@ fun PluginManagementScreen(
                         modifier = Modifier.padding(top = if (loadedPluginIds.isNotEmpty()) 16.dp else 0.dp)
                     )
                     
-                    // Bulk actions could go here
-                    IconButton(onClick = { /* TODO: Bulk operations */ }) {
-                        Icon(Icons.Default.MoreVert, "More Options")
+                    // Bulk actions
+                    Box {
+                        IconButton(onClick = { showBulkOperationsMenu = true }) {
+                            Icon(Icons.Default.MoreVert, "More Options")
+                        }
+                        DropdownMenu(
+                            expanded = showBulkOperationsMenu,
+                            onDismissRequest = { showBulkOperationsMenu = false }
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text("Select All") },
+                                onClick = {
+                                    selectedPluginsForBulk = availablePlugins.map { it.id }.toSet()
+                                    showBulkOperationsMenu = false
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Deselect All") },
+                                onClick = {
+                                    selectedPluginsForBulk = emptySet()
+                                    showBulkOperationsMenu = false
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Load Selected (${selectedPluginsForBulk.size})") },
+                                onClick = {
+                                    coroutineScope.launch {
+                                        selectedPluginsForBulk.forEach { pluginId ->
+                                            val plugin = availablePlugins.find { it.id == pluginId }
+                                            if (plugin != null && plugin.id !in loadedPluginIds) {
+                                                pluginFramework.loadPlugin(pluginId)
+                                                logger.i(LogCategory.USER_ACTION, "PluginManagementScreen", 
+                                                    "Bulk loaded plugin: ${plugin.name}")
+                                            }
+                                        }
+                                        android.widget.Toast.makeText(
+                                            context,
+                                            "Loaded ${selectedPluginsForBulk.size} plugin(s)",
+                                            android.widget.Toast.LENGTH_SHORT
+                                        ).show()
+                                        selectedPluginsForBulk = emptySet()
+                                    }
+                                    showBulkOperationsMenu = false
+                                },
+                                enabled = selectedPluginsForBulk.isNotEmpty()
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Unload Selected (${selectedPluginsForBulk.size})") },
+                                onClick = {
+                                    coroutineScope.launch {
+                                        selectedPluginsForBulk.forEach { pluginId ->
+                                            val plugin = availablePlugins.find { it.id == pluginId }
+                                            if (plugin != null && plugin.id in loadedPluginIds) {
+                                                pluginFramework.unloadPlugin(pluginId)
+                                                logger.i(LogCategory.USER_ACTION, "PluginManagementScreen", 
+                                                    "Bulk unloaded plugin: ${plugin.name}")
+                                            }
+                                        }
+                                        android.widget.Toast.makeText(
+                                            context,
+                                            "Unloaded ${selectedPluginsForBulk.size} plugin(s)",
+                                            android.widget.Toast.LENGTH_SHORT
+                                        ).show()
+                                        selectedPluginsForBulk = emptySet()
+                                    }
+                                    showBulkOperationsMenu = false
+                                },
+                                enabled = selectedPluginsForBulk.isNotEmpty()
+                            )
+                        }
                     }
                 }
             }
@@ -170,6 +239,14 @@ fun PluginManagementScreen(
                 PluginCard(
                         plugin = plugin,
                         isLoaded = plugin.id in loadedPluginIds,
+                        isSelected = plugin.id in selectedPluginsForBulk,
+                        onToggleSelection = { pluginId ->
+                            selectedPluginsForBulk = if (pluginId in selectedPluginsForBulk) {
+                                selectedPluginsForBulk - pluginId
+                            } else {
+                                selectedPluginsForBulk + pluginId
+                            }
+                        },
                         onTogglePlugin = { metadata ->
                             coroutineScope.launch {
                                 if (metadata.id in loadedPluginIds) {
@@ -322,12 +399,25 @@ fun OverviewStatItem(label: String, value: String, icon: androidx.compose.ui.gra
 fun PluginCard(
     plugin: PluginMetadata,
     isLoaded: Boolean,
+    isSelected: Boolean = false,
+    onToggleSelection: (String) -> Unit = {},
     onTogglePlugin: (PluginMetadata) -> Unit,
     onShowDetails: (PluginMetadata) -> Unit,
     onConfigurePlugin: (PluginMetadata) -> Unit
 ) {
     Card(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .then(
+                if (isSelected) {
+                    Modifier.background(
+                        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f),
+                        RoundedCornerShape(8.dp)
+                    )
+                } else {
+                    Modifier
+                }
+            ),
         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
     ) {
         Column(
@@ -340,9 +430,16 @@ fun PluginCard(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Column(
-                    modifier = Modifier.weight(1f)
+                Row(
+                    modifier = Modifier.weight(1f),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
+                    Checkbox(
+                        checked = isSelected,
+                        onCheckedChange = { onToggleSelection(plugin.id) },
+                        modifier = Modifier.padding(end = 8.dp)
+                    )
+                    Column {
                     Text(
                         text = plugin.name,
                         style = MaterialTheme.typography.titleMedium,
