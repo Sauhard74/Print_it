@@ -741,11 +741,11 @@ fun StatRow(label: String, value: String) {
 private fun getLogLevelColor(level: LogLevel): Color {
     return when (level) {
         LogLevel.VERBOSE -> Color.Gray
-        LogLevel.DEBUG -> Color.Blue
+        LogLevel.DEBUG -> Color.Cyan
         LogLevel.INFO -> Color.Green
-        LogLevel.WARN -> Color(0xFFFF9800) // Orange
+        LogLevel.WARN -> Color(0xFF00FF00) // Orange
         LogLevel.ERROR -> Color.Red
-        LogLevel.CRITICAL -> Color(0xFF8B0000) // Dark Red
+        LogLevel.CRITICAL -> Color(0xFFFB0000) // Dark Red
     }
 }
 
