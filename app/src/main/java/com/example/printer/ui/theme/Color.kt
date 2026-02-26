@@ -3,7 +3,7 @@ package com.example.printer.ui.theme
 import androidx.compose.ui.graphics.Color
 
 // Light Theme
-val Primary = Color(0xFF0066BB)
+val Primary = Color(0xFF00569E)
 val Secondary = Color(0xFF00A3E0)
 val Tertiary = Color(0xFF00558C)
 val Background = Color(0xFFF5F9FC)
