@@ -275,3 +275,11 @@ For issues with custom attributes:
 4. Test with default attributes first, then add customizations
 5. Remember priority order: Plugins override everything
 
+# How to Frame Your Pull Request
+1.  “Add Print Preview Mode and Dark Theme Support”
+2. Explain user benefit.
+3. Include screenshots (before/after).
+4. Mention no breaking changes.
+
+
+
